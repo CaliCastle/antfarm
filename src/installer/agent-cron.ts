@@ -7,7 +7,7 @@ const DEFAULT_EVERY_MS = 300_000; // 5 minutes
 const DEFAULT_AGENT_TIMEOUT_SECONDS = 30 * 60; // 30 minutes
 
 function buildAgentPrompt(workflowId: string, agentId: string): string {
-  const fullAgentId = `${workflowId}/${agentId}`;
+  const fullAgentId = `${workflowId}-${agentId}`;
   const cli = resolveAntfarmCli();
 
   return `You are an Antfarm workflow agent. Check for pending work and execute it.
@@ -28,6 +28,43 @@ The "input" field contains your FULLY RESOLVED task instructions. Read it carefu
 Step 3 — Do the work described in the input. Format your output with KEY: value lines as specified.
 
 Step 4 — MANDATORY: Report completion (do this IMMEDIATELY after finishing the work):
+\`\`\`
+cat <<'ANTFARM_EOF' > /tmp/antfarm-step-output.txt
+STATUS: done
+CHANGES: what you did
+TESTS: what tests you ran
+ANTFARM_EOF
+cat /tmp/antfarm-step-output.txt | node ${cli} step complete "<stepId>"
+\`\`\`
+
+If the work FAILED:
+\`\`\`
+node ${cli} step fail "<stepId>" "description of what went wrong"
+\`\`\`
+
+RULES:
+1. NEVER end your session without calling step complete or step fail
+2. Write output to a file first, then pipe via stdin (shell escaping breaks direct args)
+3. If you're unsure whether to complete or fail, call step fail with an explanation
+
+The workflow cannot advance until you report. Your session ending without reporting = broken pipeline.`;
+}
+
+export function buildWorkPrompt(workflowId: string, agentId: string): string {
+  const fullAgentId = `${workflowId}-${agentId}`;
+  const cli = resolveAntfarmCli();
+
+  return `You are an Antfarm workflow agent. Execute the pending work below.
+
+⚠️ CRITICAL: You MUST call "step complete" or "step fail" before ending your session. If you don't, the workflow will be stuck forever. This is non-negotiable.
+
+The claimed step JSON is provided below. It contains: {"stepId": "...", "runId": "...", "input": "..."}
+Save the stepId — you'll need it to report completion.
+The "input" field contains your FULLY RESOLVED task instructions. Read it carefully and DO the work.
+
+Do the work described in the input. Format your output with KEY: value lines as specified.
+
+MANDATORY: Report completion (do this IMMEDIATELY after finishing the work):
 \`\`\`
 cat <<'ANTFARM_EOF' > /tmp/antfarm-step-output.txt
 STATUS: done
