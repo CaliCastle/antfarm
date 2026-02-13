@@ -50,6 +50,18 @@ RULES:
 The workflow cannot advance until you report. Your session ending without reporting = broken pipeline.`;
 }
 
+export function buildPollingPrompt(workflowId: string, agentId: string): string {
+  const fullAgentId = `${workflowId}/${agentId}`;
+  const cli = resolveAntfarmCli();
+
+  return `Check for pending work. Run this command:
+\`\`\`
+node ${cli} step claim "${fullAgentId}"
+\`\`\`
+If the output is "NO_WORK", reply HEARTBEAT_OK and stop.
+If JSON is returned, reply with the full JSON output exactly as received.`;
+}
+
 export async function setupAgentCrons(workflow: WorkflowSpec): Promise<void> {
   const agents = workflow.agents;
   // Allow per-workflow cron interval via cron.interval_ms in workflow.yml
