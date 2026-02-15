@@ -540,7 +540,7 @@ export function claimStep(agentId: string): ClaimResult {
       db.prepare("UPDATE runs SET context = ?, updated_at = datetime('now') WHERE id = ?").run(JSON.stringify(context), step.run_id);
 
       const resolvedInput = resolveTemplate(step.input_template, context);
-      return { found: true, stepId: step.step_id, runId: step.run_id, resolvedInput };
+      return { found: true, stepId: step.id, runId: step.run_id, resolvedInput };
     }
   }
 
@@ -563,7 +563,7 @@ export function claimStep(agentId: string): ClaimResult {
 
   return {
     found: true,
-    stepId: step.step_id,
+    stepId: step.id,
     runId: step.run_id,
     resolvedInput,
   };
