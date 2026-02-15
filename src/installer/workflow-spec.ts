@@ -10,6 +10,9 @@ export async function loadWorkflowSpec(workflowDir: string): Promise<WorkflowSpe
   if (!parsed?.id) {
     throw new Error(`workflow.yml missing id in ${workflowDir}`);
   }
+  if (parsed.id.includes("_")) {
+    throw new Error(`workflow.yml id "${parsed.id}" must not contain underscores`);
+  }
   if (!Array.isArray(parsed.agents) || parsed.agents.length === 0) {
     throw new Error(`workflow.yml missing agents list in ${workflowDir}`);
   }
@@ -45,6 +48,9 @@ function validateAgents(agents: WorkflowAgent[], workflowDir: string) {
   for (const agent of agents) {
     if (!agent.id?.trim()) {
       throw new Error(`workflow.yml missing agent id in ${workflowDir}`);
+    }
+    if (agent.id.includes("_")) {
+      throw new Error(`workflow.yml agent "${agent.id}" must not contain underscores (reserved as namespace separator)`);
     }
     if (ids.has(agent.id)) {
       throw new Error(`workflow.yml has duplicate agent id "${agent.id}" in ${workflowDir}`);

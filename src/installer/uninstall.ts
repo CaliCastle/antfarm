@@ -23,7 +23,7 @@ function filterAgentList(
   list: Array<Record<string, unknown>>,
   workflowId: string,
 ): Array<Record<string, unknown>> {
-  const prefix = `${workflowId}-`;
+  const prefix = `${workflowId}_`;
   return list.filter((entry) => {
     const id = typeof entry.id === "string" ? entry.id : "";
     return !id.startsWith(prefix);
@@ -118,7 +118,7 @@ export async function uninstallWorkflow(params: {
     if (!agentDir) {
       continue;
     }
-    // Remove the entire parent directory (e.g. ~/.openclaw/agents/bug-fix-triager/)
+    // Remove the entire parent directory (e.g. ~/.openclaw/agents/bug-fix_triager/)
     // since both agent/ and sessions/ inside it are antfarm-managed
     const parentDir = path.dirname(agentDir);
     if (await pathExists(parentDir)) {
@@ -209,7 +209,7 @@ export async function uninstallAllWorkflows(): Promise<void> {
     if (!agentDir) {
       continue;
     }
-    // Remove the entire parent directory (e.g. ~/.openclaw/agents/bug-fix-triager/)
+    // Remove the entire parent directory (e.g. ~/.openclaw/agents/bug-fix_triager/)
     // since both agent/ and sessions/ inside it are antfarm-managed
     const parentDir = path.dirname(agentDir);
     if (await pathExists(parentDir)) {

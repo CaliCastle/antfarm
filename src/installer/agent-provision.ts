@@ -80,11 +80,11 @@ export async function provisionAgents(params: {
       await ensureDir(skillsDir);
     }
 
-    const agentDir = resolveAgentDir(`${params.workflow.id}-${agent.id}`);
+    const agentDir = resolveAgentDir(`${params.workflow.id}_${agent.id}`);
     await ensureDir(agentDir);
 
     results.push({
-      id: `${params.workflow.id}-${agent.id}`,
+      id: `${params.workflow.id}_${agent.id}`,
       name: agent.name,
       model: agent.model,
       timeoutSeconds: agent.timeoutSeconds,

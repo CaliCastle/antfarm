@@ -250,10 +250,16 @@ export async function installWorkflow(params: { workflowId: string }): Promise<W
   ensureSessionMaintenance(config);
   const list = ensureAgentList(config);
   ensureMainAgentInList(list, config);
+  for (const agent of provisioned) {
+    const existing = list.find((entry) => entry.id === agent.id);
+    if (existing && !agent.id.startsWith(workflow.id + "_")) {
+      throw new Error(`Agent ID collision: "${agent.id}" already exists from a different source`);
+    }
+  }
   addSubagentAllowlist(config, provisioned.map((a) => a.id));
   for (const agent of provisioned) {
     // Extract the local agent id (strip the workflow prefix + separator)
-    const prefix = workflow.id + "-";
+    const prefix = workflow.id + "_";
     const localId = agent.id.startsWith(prefix) ? agent.id.slice(prefix.length) : agent.id;
     const role = roleMap.get(localId) ?? inferRole(localId);
     upsertAgent(list, { ...agent, role });
