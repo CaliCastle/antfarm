@@ -10,7 +10,7 @@ description: |
   Then integration/E2E testing, PR creation, and code review.
 
 polling:
-  model: default
+  model: google-gemini-cli/gemini-3-flash-preview
   timeoutSeconds: 120
 
 agents:
@@ -18,8 +18,19 @@ agents:
     name: Planner
     role: analysis
     description: Decomposes tasks into ordered user stories.
+    model: anthropic/claude-opus-4-6
     workspace:
       baseDir: agents/planner
+      skills:
+        - agent-browser
+        - brainstorming
+        - building-components
+        - context7
+        - convex
+        - next-best-practices
+        - ui-ux-pro-max
+        - vercel-react-best-practices
+        - web-design-guidelines
       files:
         AGENTS.md: agents/planner/AGENTS.md
         SOUL.md: agents/planner/SOUL.md
@@ -29,8 +40,19 @@ agents:
     name: Setup
     role: coding
     description: Prepares environment, creates branch, establishes baseline.
+    model: openai-codex/gpt-5.3-codex
     workspace:
       baseDir: agents/setup
+      skills:
+        - agent-browser
+        - brainstorming
+        - building-components
+        - context7
+        - convex
+        - next-best-practices
+        - ui-ux-pro-max
+        - vercel-react-best-practices
+        - web-design-guidelines
       files:
         AGENTS.md: ../../agents/shared/setup/AGENTS.md
         SOUL.md: ../../agents/shared/setup/SOUL.md
@@ -40,8 +62,19 @@ agents:
     name: Developer
     role: coding
     description: Implements features, writes tests, creates PRs.
+    model: openai-codex/gpt-5.3-codex
     workspace:
       baseDir: agents/developer
+      skills:
+        - agent-browser
+        - brainstorming
+        - building-components
+        - context7
+        - convex
+        - next-best-practices
+        - ui-ux-pro-max
+        - vercel-react-best-practices
+        - web-design-guidelines
       files:
         AGENTS.md: agents/developer/AGENTS.md
         SOUL.md: agents/developer/SOUL.md
@@ -51,10 +84,19 @@ agents:
     name: Verifier
     role: verification
     description: Quick sanity check - did developer actually do the work?
+    model: openai-codex/gpt-5.3-codex
     workspace:
       baseDir: agents/verifier
       skills:
         - agent-browser
+        - brainstorming
+        - building-components
+        - context7
+        - convex
+        - next-best-practices
+        - ui-ux-pro-max
+        - vercel-react-best-practices
+        - web-design-guidelines
       files:
         AGENTS.md: ../../agents/shared/verifier/AGENTS.md
         SOUL.md: ../../agents/shared/verifier/SOUL.md
@@ -64,21 +106,63 @@ agents:
     name: Tester
     role: testing
     description: Integration and E2E testing after all stories are implemented.
+    model: openai-codex/gpt-5.3-codex
     workspace:
       baseDir: agents/tester
+      skills:
+        - agent-browser
+        - brainstorming
+        - building-components
+        - context7
+        - convex
+        - next-best-practices
+        - ui-ux-pro-max
+        - vercel-react-best-practices
+        - web-design-guidelines
       files:
         AGENTS.md: agents/tester/AGENTS.md
         SOUL.md: agents/tester/SOUL.md
         IDENTITY.md: agents/tester/IDENTITY.md
 
+  - id: pr
+    name: PR Creator
+    role: pr
+    description: Creates a pull request with comprehensive feature documentation.
+    model: anthropic/claude-opus-4-6
+    workspace:
+      baseDir: agents/pr
+      skills:
+        - agent-browser
+        - brainstorming
+        - building-components
+        - context7
+        - convex
+        - next-best-practices
+        - ui-ux-pro-max
+        - vercel-react-best-practices
+        - web-design-guidelines
+      files:
+        AGENTS.md: ../../agents/shared/pr/AGENTS.md
+        SOUL.md: ../../agents/shared/pr/SOUL.md
+        IDENTITY.md: ../../agents/shared/pr/IDENTITY.md
+
   - id: reviewer
     name: Reviewer
     role: analysis
     description: Reviews PRs, requests changes or approves.
+    model: openai-codex/gpt-5.3-codex
     workspace:
       baseDir: agents/reviewer
       skills:
         - agent-browser
+        - brainstorming
+        - building-components
+        - context7
+        - convex
+        - next-best-practices
+        - ui-ux-pro-max
+        - vercel-react-best-practices
+        - web-design-guidelines
       files:
         AGENTS.md: agents/reviewer/AGENTS.md
         SOUL.md: agents/reviewer/SOUL.md
@@ -124,9 +208,16 @@ steps:
       REPO: {{repo}}
       BRANCH: {{branch}}
 
+      IMPORTANT: Do NOT change the repository's default branch. NEVER run `gh repo edit` or `gh repo edit --default-branch`. Only create and push the feature branch.
+
       Instructions:
       1. cd into the repo
-      2. Create the feature branch (git checkout -b {{branch}})
+      2. Create a git worktree for isolated development:
+         ```
+         WORKTREE="/tmp/antfarm-{{run_id}}"
+         git worktree add "$WORKTREE" -b {{branch}} origin/main
+         cd "$WORKTREE"
+         ```
       3. Read package.json, CI config, test config to understand the build/test setup
       4. Ensure .gitignore exists — if missing, create one appropriate for the detected stack (must include .env, node_modules/, *.key, *.pem at minimum)
       5. Run the build to establish a baseline
@@ -135,6 +226,7 @@ steps:
 
       Reply with:
       STATUS: done
+      WORKTREE: /tmp/antfarm-{{run_id}}
       BUILD_CMD: <build command>
       TEST_CMD: <test command>
       CI_NOTES: <brief CI notes>
@@ -160,6 +252,7 @@ steps:
       {{task}}
 
       REPO: {{repo}}
+      WORKTREE: {{worktree}}
       BRANCH: {{branch}}
       BUILD_CMD: {{build_cmd}}
       TEST_CMD: {{test_cmd}}
@@ -179,9 +272,10 @@ steps:
       {{progress}}
 
       Instructions:
-      1. Read progress-{{run_id}}.txt — especially the Codebase Patterns section
-      2. Pull latest on the branch
-      3. Implement this story only
+      1. cd into {{worktree}} (git worktree — do NOT checkout branches in the main repo)
+      2. Read progress-{{run_id}}.txt — especially the Codebase Patterns section
+      3. Pull latest on the branch
+      4. Implement this story only
       4. Write tests for this story's functionality
       5. Run typecheck / build
       6. Run tests to confirm they pass
@@ -207,6 +301,7 @@ steps:
       {{task}}
 
       REPO: {{repo}}
+      WORKTREE: {{worktree}}
       BRANCH: {{branch}}
       CHANGES: {{changes}}
       TEST_CMD: {{test_cmd}}
@@ -218,8 +313,9 @@ steps:
       {{progress}}
 
       Check:
-      1. Code exists (not just TODOs or placeholders)
-      2. Each acceptance criterion for the story is met
+      1. cd into {{worktree}} (git worktree — do NOT checkout branches in the main repo)
+      2. Code exists (not just TODOs or placeholders)
+      3. Each acceptance criterion for the story is met
       3. Tests were written for this story's functionality
       4. Tests pass (run {{test_cmd}})
       5. No obvious incomplete work
@@ -268,6 +364,7 @@ steps:
       {{task}}
 
       REPO: {{repo}}
+      WORKTREE: {{worktree}}
       BRANCH: {{branch}}
       CHANGES: {{changes}}
       BUILD_CMD: {{build_cmd}}
@@ -277,7 +374,8 @@ steps:
       {{progress}}
 
       Your job (integration/E2E testing — unit tests were already written per-story):
-      1. Run the full test suite ({{test_cmd}}) to confirm everything passes together
+      1. cd into {{worktree}} (git worktree — do NOT checkout branches in the main repo)
+      2. Run the full test suite ({{test_cmd}}) to confirm everything passes together
       2. Look for integration issues between stories
       3. If this is a UI feature, use agent-browser to test it end-to-end
       4. Check cross-cutting concerns: error handling, edge cases across features
@@ -299,32 +397,90 @@ steps:
         escalate_to: human
 
   - id: pr
-    agent: developer
+    agent: pr
     input: |
-      Create a pull request for your changes.
+      Create a pull request for the completed feature.
+
+      REPO: {{repo}}
+      WORKTREE: {{worktree}}
+      BRANCH: {{branch}}
 
       TASK:
       {{task}}
 
-      REPO: {{repo}}
-      BRANCH: {{branch}}
       CHANGES: {{changes}}
       RESULTS: {{results}}
 
       PROGRESS LOG:
       {{progress}}
 
-      Create a PR with:
-      - Clear title summarizing the change
-      - Description explaining what and why
-      - Reference to what was tested
+      Work from the worktree: cd {{worktree}}
+
+      PR title format: feat: concise description of the feature
+
+      PR body structure:
+      ```
+      ## Summary
+      Brief description of what this feature does and why.
+
+      ## Changes
+      {{changes}}
+
+      ## Stories Implemented
+      List each story that was implemented with a brief summary.
+
+      ## Testing
+      {{results}}
+
+      ## How to Review
+      Suggest which files/areas to focus on during review.
+      ```
+
+      After creating the PR:
+      1. Get the PR number from the output
+      2. Trigger Greptile review by posting a comment:
+         gh pr comment <number> --body "@greptile"
+      3. Include the PR URL in your output
 
       Use: gh pr create
 
       Reply with:
       STATUS: done
       PR: URL to the pull request
+      PR_NUMBER: <number>
     expects: "STATUS: done"
+    on_fail:
+      escalate_to: human
+
+  - id: greptile-remediate
+    agent: developer
+    input: |
+      Address Greptile's PR review feedback.
+
+      TASK: {{task}}
+      REPO: {{repo}}
+      WORKTREE: {{worktree}}
+      BRANCH: {{branch}}
+      PR: {{pr}}
+      PR_NUMBER: {{pr_number}}
+
+      Instructions:
+      1. Wait ~360 seconds for Greptile to post its review
+      2. Read PR comments: gh pr view {{pr_number}} --comments
+      3. If Greptile posted actionable feedback:
+         a. cd into {{worktree}} (git worktree)
+         b. Address each piece of actionable feedback
+         c. Commit: fix: address greptile review feedback
+         d. Push to the branch
+      4. If no Greptile feedback after waiting, or no actionable items, that's fine — skip
+
+      IMPORTANT: Do NOT change the repository's default branch. NEVER run `gh repo edit`.
+
+      Reply with:
+      STATUS: done
+      FIXES: What you fixed (or "no actionable feedback from Greptile")
+    expects: "STATUS: done"
+    max_retries: 1
     on_fail:
       escalate_to: human
 
@@ -356,7 +512,7 @@ steps:
       Has frontend changes: {{has_frontend_changes}}
 
       If {{has_frontend_changes}} is 'true', you MUST also perform a visual design review:
-      1. Check out the branch: git checkout {{branch}}
+      1. cd into {{worktree}} (git worktree — already on the branch)
       2. Use the agent-browser skill to open the changed page (file:// URL or local dev server)
       3. Take a screenshot of the rendered page
       4. Evaluate visual polish and design quality:

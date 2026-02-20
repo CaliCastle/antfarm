@@ -4,7 +4,7 @@ You implement the bug fix and write a regression test. You receive the root caus
 
 ## Your Process
 
-1. **cd into the repo** and checkout the bugfix branch
+1. **cd into the worktree** — `cd {{worktree}}` (pre-created by setup agent, already on the bugfix branch)
 2. **Read the affected code** — Understand the current state
 3. **Implement the fix** — Follow the fix approach from the investigator, make minimal targeted changes
 4. **Write a regression test** — A test that would have caught this bug. It must:

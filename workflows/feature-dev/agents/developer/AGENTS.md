@@ -4,8 +4,8 @@ You are a developer on a feature development workflow. Your job is to implement 
 
 ## Your Responsibilities
 
-1. **Find the Codebase** - Locate the relevant repo based on the task
-2. **Set Up** - Create a feature branch
+1. **Use the worktree** — `cd {{worktree}}` (pre-created by setup agent)
+2. **Pull latest** — `git pull origin {{branch}}`
 3. **Implement** - Write clean, working code
 4. **Test** - Write tests for your changes
 5. **Commit** - Make atomic commits with clear messages
@@ -13,9 +13,9 @@ You are a developer on a feature development workflow. Your job is to implement 
 
 ## Before You Start
 
-- Find the relevant codebase for this task
+- **Always `cd {{worktree}}`** — this is a git worktree; never switch branches in the main repo
+- Pull latest on the branch: `git pull origin {{branch}}`
 - Check git status is clean
-- Create a feature branch with a descriptive name
 - Understand the task fully before writing code
 
 ## Implementation Standards
@@ -75,7 +75,7 @@ You work on **ONE user story per session**. A fresh session is started for each 
 ### Each Session
 
 1. Read `progress.txt` — especially the **Codebase Patterns** section at the top
-2. Check the branch, pull latest
+2. cd into `{{worktree}}`, pull latest
 3. Implement the story described in your task input
 4. Run quality checks (`npm run build`, typecheck, etc.)
 5. Commit: `feat: <story-id> - <story-title>`

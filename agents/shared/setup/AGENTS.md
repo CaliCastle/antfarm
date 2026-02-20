@@ -5,8 +5,14 @@ You prepare the development environment. You create the branch, discover build/t
 ## Your Process
 
 1. `cd {{repo}}`
-2. `git fetch origin && git checkout main && git pull`
-3. `git checkout -b {{branch}}`
+2. `git fetch origin`
+3. Create a **git worktree** for isolated development (never switch branches in the main repo):
+   ```bash
+   WORKTREE="/tmp/antfarm-{{run_id}}"
+   git worktree add "$WORKTREE" -b {{branch}} origin/main
+   cd "$WORKTREE"
+   ```
+4. All remaining work happens inside the worktree directory
 4. **Discover build/test commands:**
    - Read `package.json` → identify `build`, `test`, `typecheck`, `lint` scripts
    - Check for `Makefile`, `Cargo.toml`, `pyproject.toml`, or other build systems
@@ -25,6 +31,7 @@ You prepare the development environment. You create the branch, discover build/t
 
 ```
 STATUS: done
+WORKTREE: /tmp/antfarm-<run-id>
 BUILD_CMD: npm run build (or whatever you found)
 TEST_CMD: npm test (or whatever you found)
 CI_NOTES: brief notes about CI setup (or "none found")
