@@ -23,10 +23,8 @@ agents:
       baseDir: agents/planner
       skills:
         - agent-browser
-        - brainstorming
         - building-components
         - context7
-        - convex
         - next-best-practices
         - ui-ux-pro-max
         - vercel-react-best-practices
@@ -45,10 +43,8 @@ agents:
       baseDir: agents/setup
       skills:
         - agent-browser
-        - brainstorming
         - building-components
         - context7
-        - convex
         - next-best-practices
         - ui-ux-pro-max
         - vercel-react-best-practices
@@ -67,10 +63,8 @@ agents:
       baseDir: agents/developer
       skills:
         - agent-browser
-        - brainstorming
         - building-components
         - context7
-        - convex
         - next-best-practices
         - ui-ux-pro-max
         - vercel-react-best-practices
@@ -89,10 +83,8 @@ agents:
       baseDir: agents/verifier
       skills:
         - agent-browser
-        - brainstorming
         - building-components
         - context7
-        - convex
         - next-best-practices
         - ui-ux-pro-max
         - vercel-react-best-practices
@@ -111,10 +103,8 @@ agents:
       baseDir: agents/tester
       skills:
         - agent-browser
-        - brainstorming
         - building-components
         - context7
-        - convex
         - next-best-practices
         - ui-ux-pro-max
         - vercel-react-best-practices
@@ -133,10 +123,8 @@ agents:
       baseDir: agents/pr
       skills:
         - agent-browser
-        - brainstorming
         - building-components
         - context7
-        - convex
         - next-best-practices
         - ui-ux-pro-max
         - vercel-react-best-practices
@@ -155,10 +143,8 @@ agents:
       baseDir: agents/reviewer
       skills:
         - agent-browser
-        - brainstorming
         - building-components
         - context7
-        - convex
         - next-best-practices
         - ui-ux-pro-max
         - vercel-react-best-practices
