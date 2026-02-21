@@ -2,7 +2,7 @@
 # session with clean context. Memory persists via git history and progress files.
 id: feature-dev
 name: Feature Development Workflow
-version: 5
+version: 6
 description: |
   Story-based execution pipeline. Planner decomposes tasks into user stories.
   Setup prepares the environment and establishes baseline.
@@ -424,8 +424,9 @@ steps:
 
       After creating the PR:
       1. Get the PR number from the output
-      2. Trigger Greptile review by posting a comment:
+      2. Trigger automated reviews by posting comments:
          gh pr comment <number> --body "@greptile"
+         gh pr comment <number> --body "@codex"
       3. Include the PR URL in your output
 
       Use: gh pr create
@@ -438,10 +439,10 @@ steps:
     on_fail:
       escalate_to: human
 
-  - id: greptile-remediate
+  - id: external-review-remediate
     agent: developer
     input: |
-      Address Greptile's PR review feedback.
+      Address external PR review feedback (Greptile + Codex).
 
       TASK: {{task}}
       REPO: {{repo}}
@@ -451,20 +452,20 @@ steps:
       PR_NUMBER: {{pr_number}}
 
       Instructions:
-      1. Wait ~360 seconds for Greptile to post its review
+      1. Wait ~360 seconds for external reviewers to post feedback
       2. Read PR comments: gh pr view {{pr_number}} --comments
-      3. If Greptile posted actionable feedback:
+      3. If Greptile and/or Codex posted actionable feedback:
          a. cd into {{worktree}} (git worktree)
          b. Address each piece of actionable feedback
-         c. Commit: fix: address greptile review feedback
+         c. Commit: fix: address external review feedback
          d. Push to the branch
-      4. If no Greptile feedback after waiting, or no actionable items, that's fine — skip
+      4. If no feedback after waiting, or no actionable items, that's fine — skip
 
       IMPORTANT: Do NOT change the repository's default branch. NEVER run `gh repo edit`.
 
       Reply with:
       STATUS: done
-      FIXES: What you fixed (or "no actionable feedback from Greptile")
+      FIXES: What you fixed (or "no actionable feedback from Greptile/Codex")
     expects: "STATUS: done"
     max_retries: 1
     on_fail:

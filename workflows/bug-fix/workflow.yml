@@ -1,7 +1,7 @@
 # Ralph loop (https://github.com/snarktank/ralph) — fresh context per agent session
 id: bug-fix
 name: Bug Triage & Fix
-version: 1
+version: 2
 description: |
   Bug fix pipeline. Triager analyzes the report and reproduces the issue.
   Investigator traces root cause. Setup creates the bugfix branch.
@@ -296,11 +296,53 @@ steps:
       {{verified}}
       ```
 
+      After creating the PR:
+      1. Get the PR number from the output
+      2. Trigger automated reviews by posting comments:
+         gh pr comment <number> --body "@greptile"
+         gh pr comment <number> --body "@codex"
+      3. Include the PR URL in your output
+
       Use: gh pr create
 
       Reply with:
       STATUS: done
       PR: URL to the pull request
+      PR_NUMBER: <number>
     expects: "STATUS: done"
+    on_fail:
+      escalate_to: human
+
+  - id: external-review-remediate
+    agent: fixer
+    input: |
+      Address external PR review feedback (Greptile + Codex).
+
+      BUG REPORT:
+      {{task}}
+
+      REPO: {{repo}}
+      WORKTREE: {{worktree}}
+      BRANCH: {{branch}}
+      PR: {{pr}}
+      PR_NUMBER: {{pr_number}}
+
+      Instructions:
+      1. Wait ~360 seconds for external reviewers to post feedback
+      2. Read PR comments: gh pr view {{pr_number}} --comments
+      3. If Greptile and/or Codex posted actionable feedback:
+         a. cd into {{worktree}} (git worktree — already on the bugfix branch)
+         b. Address each piece of actionable feedback
+         c. Commit: fix: address external review feedback
+         d. Push to the branch
+      4. If no feedback after waiting, or no actionable items, that's fine — skip
+
+      IMPORTANT: Do NOT change the repository's default branch. NEVER run `gh repo edit`.
+
+      Reply with:
+      STATUS: done
+      FIXES: What you fixed (or "no actionable feedback from Greptile/Codex")
+    expects: "STATUS: done"
+    max_retries: 1
     on_fail:
       escalate_to: human
