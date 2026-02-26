@@ -9,6 +9,7 @@ import {
   exportProjectStories,
   exportIssueStory,
   ensureLabel,
+  applyLabel,
   type LinearStory,
   type LinearConfig,
 } from "./linear-hooks.js";
@@ -63,14 +64,20 @@ export async function runWorkflow(params: RunWorkflowParams): Promise<{ id: stri
       throw new Error(`Unknown stories source: "${source}". Supported: "linear", "linear-issue".`);
     }
 
-    // Ensure wbs/nick label
+    // Ensure wbs/nick label and apply to imported issues
     const labelId = ensureLabel("wbs/nick");
+    if (labelId) {
+      for (const s of linearStories) {
+        applyLabel(s.linearIssueId, labelId);
+      }
+    }
 
-    // Build Linear mapping for status sync hooks
+    // Build Linear mapping for status sync hooks (include teamId for reliable state resolution)
     linearMapping = linearStories.map(s => ({
       storyId: s.id,
       linearIssueId: s.linearIssueId,
       linearIdentifier: s.linearIdentifier,
+      teamId: s.teamId,
     }));
 
     initialContext["linear_mapping"] = JSON.stringify(linearMapping);

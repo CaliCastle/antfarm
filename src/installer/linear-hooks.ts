@@ -20,6 +20,7 @@ export interface LinearIssue {
   description: string;
   priority: number;
   state: { id: string; name: string };
+  team: { id: string; name: string };
   labels: Array<{ id: string; name: string }>;
   sortOrder: number;
 }
@@ -31,6 +32,7 @@ export interface LinearStory {
   acceptanceCriteria: string[];
   linearIssueId: string;
   linearIdentifier: string;
+  teamId: string;
 }
 
 export interface LinearConfig {
@@ -131,6 +133,7 @@ export function exportProjectStories(projectId: string): LinearStory[] {
     acceptanceCriteria: parseAcceptanceCriteria(issue.description || issue.title),
     linearIssueId: issue.id,
     linearIdentifier: issue.identifier,
+    teamId: issue.team.id,
   }));
 }
 
@@ -147,6 +150,7 @@ export function exportIssueStory(issueId: string): LinearStory[] {
     acceptanceCriteria: parseAcceptanceCriteria(issue.description || issue.title),
     linearIssueId: issue.id,
     linearIdentifier: issue.identifier,
+    teamId: issue.team.id,
   }];
 }
 
@@ -239,6 +243,7 @@ export function createLinearIssues(params: CreateLinearIssuesParams): LinearStor
       acceptanceCriteria: story.acceptanceCriteria,
       linearIssueId: created.id,
       linearIdentifier: created.identifier,
+      teamId: params.teamId,
     });
   }
 
@@ -370,6 +375,17 @@ export function onStoryFailed(runId: string, storyId: string, error: string): vo
 /**
  * Find or create the wbs/nick label, returning its ID.
  */
+/**
+ * Apply a label to an existing Linear issue.
+ */
+export function applyLabel(issueId: string, labelId: string): void {
+  try {
+    linearJson(["issue", "update", issueId, "--label", labelId]);
+  } catch (err) {
+    logger.warn(`Failed to apply label ${labelId} to issue ${issueId}: ${err}`);
+  }
+}
+
 export function ensureLabel(name: string): string | null {
   try {
     const labels = linearJson<Array<{ id: string; name: string }>>(["label", "list"]);
