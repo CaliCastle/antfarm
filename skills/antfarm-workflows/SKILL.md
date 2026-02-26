@@ -14,43 +14,82 @@ All CLI commands use the full path to avoid PATH issues:
 node ~/.openclaw/workspace/antfarm/dist/cli/cli.js <command>
 ```
 
-Shorthand used below: `antfarm-cli` means `node ~/.openclaw/workspace/antfarm/dist/cli/cli.js`.
+Shorthand used below: `antfarm` means `node ~/.openclaw/workspace/antfarm/dist/cli/cli.js`.
 
 ## Workflows
 
-| Workflow | Pipeline | Use for |
-|----------|----------|---------|
-| `feature-dev` | plan -> setup -> develop (stories) -> verify -> test -> PR -> review | New features, refactors |
-| `bug-fix` | triage -> investigate -> setup -> fix -> verify -> PR | Bug reports with reproduction steps |
-| `security-audit` | scan -> prioritize -> setup -> fix -> verify -> test -> PR | Codebase security review |
+| Workflow | Pipeline | Agents | Use for |
+|----------|----------|--------|---------|
+| `feature-dev` | plan → setup → implement → verify → test → PR → external-review → review | 7 | New features, refactors |
+| `bug-fix` | triage → investigate → setup → fix → verify → PR → external-review | 6 | Bug reports with reproduction steps |
+| `security-audit` | scan → prioritize → setup → fix → verify → test → PR | 7 | Codebase security review |
 
 ## Core Commands
 
 ```bash
 # Install all workflows (creates agents + starts dashboard)
-node ~/.openclaw/workspace/antfarm/dist/cli/cli.js install
+antfarm install
 
-# Full uninstall (workflows, agents, crons, DB, dashboard)
-node ~/.openclaw/workspace/antfarm/dist/cli/cli.js uninstall [--force]
+# Full uninstall (workflows, agents, crons, DB)
+antfarm uninstall [--force]
 
 # Start a run
-node ~/.openclaw/workspace/antfarm/dist/cli/cli.js workflow run <workflow-id> "<detailed task with acceptance criteria>"
+antfarm workflow run <workflow-id> "<detailed task with acceptance criteria>"
+
+# Start a run with explicit repo path
+antfarm workflow run <workflow-id> "<task>" --repo /path/to/repo
+
+# Import stories from Linear instead of using the planner
+antfarm workflow run feature-dev "<task>" --stories-from linear:<project-id>
+antfarm workflow run feature-dev "<task>" --stories-from linear-issue:<issue-id>
+
+# Blank-slate Linear integration (creates Linear issues from planner output)
+antfarm workflow run feature-dev "<task>" --linear-team <team-id> --linear-project <project-id>
+
+# Pause after story import for human approval
+antfarm workflow run feature-dev "<task>" --stories-from linear:<id> --approve
 
 # Check a run
-node ~/.openclaw/workspace/antfarm/dist/cli/cli.js workflow status "<task or run-id prefix>"
+antfarm workflow status "<task or run-id prefix>"
 
 # List all runs
-node ~/.openclaw/workspace/antfarm/dist/cli/cli.js workflow runs
+antfarm workflow runs
 
 # Resume a failed run from the failed step
-node ~/.openclaw/workspace/antfarm/dist/cli/cli.js workflow resume <run-id>
+antfarm workflow resume <run-id>
+
+# Stop/cancel a running workflow
+antfarm workflow stop <run-id>
+
+# Recreate agent crons for a workflow
+antfarm workflow ensure-crons <name>
 
 # View logs
-node ~/.openclaw/workspace/antfarm/dist/cli/cli.js logs [lines]
+antfarm logs [lines]
+antfarm logs <run-id>
 
 # Dashboard
-node ~/.openclaw/workspace/antfarm/dist/cli/cli.js dashboard [start] [--port N]
-node ~/.openclaw/workspace/antfarm/dist/cli/cli.js dashboard stop
+antfarm dashboard [start] [--port N]
+antfarm dashboard stop
+antfarm dashboard status
+
+# Self-update (pull, rebuild, reinstall)
+antfarm update
+
+# Version
+antfarm version
+```
+
+## Medic (Watchdog)
+
+Antfarm includes a medic that monitors workflow health and auto-recovers stuck runs:
+
+```bash
+antfarm medic install        # Install medic watchdog cron
+antfarm medic uninstall      # Remove medic cron
+antfarm medic run            # Run medic check now
+antfarm medic status         # Show health summary
+antfarm medic log [<count>]  # Recent medic check history
 ```
 
 ## Before Starting a Run
@@ -70,32 +109,47 @@ Get the user to confirm the plan and acceptance criteria before running.
 - Each agent claims its step, does the work, marks it done, advancing the next step
 - Context passes between steps via KEY: value pairs in agent output
 - No central orchestrator — agents are autonomous
+- Each agent runs in a fresh session with clean context (Ralph loop pattern)
+
+## Agent Roles
+
+| Role | Access | Typical agents |
+|------|--------|----------------|
+| `analysis` | Read-only code exploration | planner, prioritizer, reviewer, investigator, triager |
+| `coding` | Full read/write/exec for implementation | developer, fixer, setup |
+| `verification` | Read + exec but NO write | verifier |
+| `testing` | Read + exec + browser/web for E2E, NO write | tester |
+| `pr` | Read + exec only (runs `gh pr create`) | pr |
+| `scanning` | Read + exec + web search, NO write | scanner |
 
 ## Force-Triggering Agents
 
 To skip the 15-min cron wait, use the `cron` tool with `action: "run"` and the agent's job ID. List crons to find them — they're named `antfarm/<workflow-id>/<agent-id>`.
 
+## Agent Step Operations
+
+Used by agent cron jobs (not typically manual):
+
+```bash
+antfarm step peek <agent-id>         # Lightweight check (HAS_WORK or NO_WORK)
+antfarm step claim <agent-id>        # Claim pending step
+antfarm step complete <step-id>      # Complete step (output from stdin)
+antfarm step fail <step-id> <error>  # Fail step with retry
+antfarm step stories <run-id>        # List stories for a run
+```
+
 ## Workflow Management
 
 ```bash
 # List available workflows
-node ~/.openclaw/workspace/antfarm/dist/cli/cli.js workflow list
+antfarm workflow list
 
 # Install/uninstall individual workflows
-node ~/.openclaw/workspace/antfarm/dist/cli/cli.js workflow install <name>
-node ~/.openclaw/workspace/antfarm/dist/cli/cli.js workflow uninstall <name>
-node ~/.openclaw/workspace/antfarm/dist/cli/cli.js workflow uninstall --all [--force]
+antfarm workflow install <name>
+antfarm workflow uninstall <name>
+antfarm workflow uninstall --all [--force]
 ```
 
 ## Creating Custom Workflows
 
 See `{baseDir}/../../docs/creating-workflows.md` for the full guide on writing workflow YAML, agent workspaces, step templates, and verification loops.
-
-## Agent Step Operations (used by agent cron jobs, not typically manual)
-
-```bash
-node ~/.openclaw/workspace/antfarm/dist/cli/cli.js step claim <agent-id>        # Claim pending step
-node ~/.openclaw/workspace/antfarm/dist/cli/cli.js step complete <step-id>      # Complete step (output from stdin)
-node ~/.openclaw/workspace/antfarm/dist/cli/cli.js step fail <step-id> <error>  # Fail step with retry
-node ~/.openclaw/workspace/antfarm/dist/cli/cli.js step stories <run-id>        # List stories for a run
-```

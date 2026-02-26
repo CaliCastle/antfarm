@@ -648,7 +648,7 @@ export function completeStep(stepId: string, output: string): { advanced: boolea
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : String(err);
         logger.error(`Failed to create Linear issues in blank-slate mode: ${errMsg}`, { runId: step.run_id });
-        emitEvent({ ts: new Date().toISOString(), event: "step.error", runId: step.run_id, workflowId: getWorkflowId(step.run_id), stepId: step.step_id, detail: `Linear blank-slate failed: ${errMsg}` });
+        emitEvent({ ts: new Date().toISOString(), event: "step.failed", runId: step.run_id, workflowId: getWorkflowId(step.run_id), stepId: step.step_id, detail: `Linear blank-slate failed: ${errMsg}` });
         // Fail the step — user explicitly requested Linear integration
         db.prepare("UPDATE steps SET status = 'error', output = ?, updated_at = datetime('now') WHERE id = ?").run(`Linear blank-slate failed: ${errMsg}`, step.id);
         db.prepare("UPDATE runs SET status = 'error', updated_at = datetime('now') WHERE id = ?").run(step.run_id);
