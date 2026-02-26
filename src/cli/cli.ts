@@ -94,6 +94,12 @@ function printUsage() {
       "antfarm workflow uninstall <name>    Uninstall a workflow (blocked if runs active)",
       "antfarm workflow uninstall --all     Uninstall all workflows (--force to override)",
       "antfarm workflow run <name> <task>   Start a workflow run",
+      "  --stories-from linear:<project-id>   Import stories from Linear (skip planner)",
+      "  --stories-from linear-issue:<id>     Import a single Linear issue as a story",
+      "  --repo <path>                        Explicit repo path",
+      "  --approve                            Pause after import for human approval",
+      "  --linear-team <id>                   Team ID for blank-slate Linear integration",
+      "  --linear-project <id>                Project ID for blank-slate Linear integration",
       "antfarm workflow status <query>      Check run status (task substring, run ID prefix)",
       "antfarm workflow runs                List all workflow runs",
       "antfarm workflow resume <run-id>     Resume a failed run from where it left off",
@@ -544,9 +550,32 @@ async function main() {
     }
 
     if (!run) { process.stderr.write(`Run not found: ${target}\n`); process.exit(1); }
-    if (run.status !== "failed") {
-      process.stderr.write(`Run ${run.id.slice(0, 8)} is "${run.status}", not "failed". Nothing to resume.\n`);
+    if (run.status !== "failed" && run.status !== "paused") {
+      process.stderr.write(`Run ${run.id.slice(0, 8)} is "${run.status}", not "failed" or "paused". Nothing to resume.\n`);
       process.exit(1);
+    }
+
+    // Handle paused runs (e.g. --approve flag): set to running and make first waiting step pending
+    if (run.status === "paused") {
+      const db3 = (await import("../db.js")).getDb();
+      db3.prepare("UPDATE runs SET status = 'running', updated_at = datetime('now') WHERE id = ?").run(run.id);
+      const firstWaiting = db3.prepare(
+        "SELECT id, step_id FROM steps WHERE run_id = ? AND status = 'waiting' ORDER BY step_index ASC LIMIT 1"
+      ).get(run.id) as { id: string; step_id: string } | undefined;
+      if (firstWaiting) {
+        db3.prepare("UPDATE steps SET status = 'pending', updated_at = datetime('now') WHERE id = ?").run(firstWaiting.id);
+      }
+      // Ensure crons
+      const { loadWorkflowSpec: lws } = await import("../installer/workflow-spec.js");
+      const { resolveWorkflowDir: rwd } = await import("../installer/paths.js");
+      const { ensureWorkflowCrons: ewc } = await import("../installer/agent-cron.js");
+      try {
+        const wd = rwd(run.workflow_id);
+        const wf = await lws(wd);
+        await ewc(wf);
+      } catch {}
+      console.log(`Resumed paused run ${run.id.slice(0, 8)} — now running.`);
+      return;
     }
 
     // Find the failed step (or first non-done step)
@@ -658,18 +687,47 @@ async function main() {
 
   if (action === "run") {
     let notifyUrl: string | undefined;
+    let storiesFrom: string | undefined;
+    let repo: string | undefined;
+    let approve = false;
+    let linearTeam: string | undefined;
+    let linearProject: string | undefined;
     const runArgs = args.slice(3);
-    const nuIdx = runArgs.indexOf("--notify-url");
-    if (nuIdx !== -1) {
-      notifyUrl = runArgs[nuIdx + 1];
-      runArgs.splice(nuIdx, 2);
+
+    // Parse flags
+    const flagParsers: Record<string, (idx: number) => void> = {
+      "--notify-url": (idx) => { notifyUrl = runArgs[idx + 1]; runArgs.splice(idx, 2); },
+      "--stories-from": (idx) => { storiesFrom = runArgs[idx + 1]; runArgs.splice(idx, 2); },
+      "--repo": (idx) => { repo = runArgs[idx + 1]; runArgs.splice(idx, 2); },
+      "--approve": (idx) => { approve = true; runArgs.splice(idx, 1); },
+      "--linear-team": (idx) => { linearTeam = runArgs[idx + 1]; runArgs.splice(idx, 2); },
+      "--linear-project": (idx) => { linearProject = runArgs[idx + 1]; runArgs.splice(idx, 2); },
+    };
+
+    for (const [flag, parser] of Object.entries(flagParsers)) {
+      let idx: number;
+      while ((idx = runArgs.indexOf(flag)) !== -1) {
+        parser(idx);
+      }
     }
+
     const taskTitle = runArgs.join(" ").trim();
     if (!taskTitle) { process.stderr.write("Missing task title.\n"); printUsage(); process.exit(1); }
-    const run = await runWorkflow({ workflowId: target, taskTitle, notifyUrl });
-    process.stdout.write(
-      [`Run: #${run.runNumber} (${run.id})`, `Workflow: ${run.workflowId}`, `Task: ${run.task}`, `Status: ${run.status}`].join("\n") + "\n",
-    );
+    const run = await runWorkflow({ workflowId: target, taskTitle, notifyUrl, storiesFrom, repo, approve, linearTeam, linearProject });
+    const lines = [
+      `Run: #${run.runNumber} (${run.id})`,
+      `Workflow: ${run.workflowId}`,
+      `Task: ${run.task}`,
+      `Status: ${run.status}`,
+    ];
+    if (run.status === "paused") {
+      lines.push("", "⏸  Run paused for approval. Review imported stories, then resume:");
+      lines.push(`   antfarm workflow resume ${run.id.slice(0, 8)}`);
+    }
+    if (storiesFrom) {
+      lines.push(`Stories: imported from ${storiesFrom}`);
+    }
+    process.stdout.write(lines.join("\n") + "\n");
     return;
   }
 

@@ -10,6 +10,7 @@ import { emitEvent } from "./events.js";
 import { logger } from "../lib/logger.js";
 import { getMaxRoleTimeoutSeconds } from "./install.js";
 import { isFrontendChange } from "../lib/frontend-detect.js";
+import { onStoryStarted, onStoryDone, onStoryFailed, onPRCreated, createLinearIssues, ensureLabel } from "./linear-hooks.js";
 
 /**
  * Parse KEY: value lines from step output with support for multi-line values.
@@ -507,6 +508,9 @@ export function claimStep(agentId: string): ClaimResult {
       emitEvent({ ts: new Date().toISOString(), event: "story.started", runId: step.run_id, workflowId: wfId, stepId: step.step_id, agentId: agentId, storyId: nextStory.story_id, storyTitle: nextStory.title });
       logger.info(`Story started: ${nextStory.story_id} — ${nextStory.title}`, { runId: step.run_id, stepId: step.step_id });
 
+      // Linear hook: move issue to In Progress
+      try { onStoryStarted(step.run_id, nextStory.story_id); } catch { /* best-effort */ }
+
       // Build story template vars
       const story: Story = {
         id: nextStory.id,
@@ -606,6 +610,53 @@ export function completeStep(stepId: string, output: string): { advanced: boolea
   // T5: Parse STORIES_JSON from output (any step, typically the planner)
   parseAndInsertStories(output, step.run_id);
 
+  // Blank-slate mode: create Linear issues from planner stories and pause
+  if (step.step_id === "plan" && context["linear_blank_slate"] === "true") {
+    const stories = getStories(step.run_id);
+    if (stories.length > 0 && context["linear_team_id"]) {
+      try {
+        const labelId = ensureLabel("wbs/nick");
+        const linearStories = createLinearIssues({
+          teamId: context["linear_team_id"],
+          projectId: context["linear_project_id"],
+          stories: stories.map(s => ({
+            id: s.storyId,
+            title: s.title,
+            description: s.description,
+            acceptanceCriteria: s.acceptanceCriteria,
+          })),
+          labelIds: labelId ? [labelId] : undefined,
+        });
+
+        // Store Linear mapping
+        const mapping = linearStories.map(s => ({
+          storyId: s.id,
+          linearIssueId: s.linearIssueId,
+          linearIdentifier: s.linearIdentifier,
+          teamId: context["linear_team_id"],
+        }));
+        context["linear_mapping"] = JSON.stringify(mapping);
+        delete context["linear_blank_slate"];
+        db.prepare("UPDATE runs SET context = ?, updated_at = datetime('now') WHERE id = ?").run(JSON.stringify(context), step.run_id);
+
+        // Pause the run for human approval
+        db.prepare("UPDATE steps SET status = 'done', output = ?, updated_at = datetime('now') WHERE id = ?").run(output, step.id);
+        db.prepare("UPDATE runs SET status = 'paused', updated_at = datetime('now') WHERE id = ?").run(step.run_id);
+        emitEvent({ ts: new Date().toISOString(), event: "step.done", runId: step.run_id, workflowId: getWorkflowId(step.run_id), stepId: step.step_id });
+        logger.info(`Blank-slate: created ${linearStories.length} Linear issues, run paused for approval`, { runId: step.run_id });
+        return { advanced: false, runCompleted: false };
+      } catch (err) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        logger.error(`Failed to create Linear issues in blank-slate mode: ${errMsg}`, { runId: step.run_id });
+        emitEvent({ ts: new Date().toISOString(), event: "step.error", runId: step.run_id, workflowId: getWorkflowId(step.run_id), stepId: step.step_id, detail: `Linear blank-slate failed: ${errMsg}` });
+        // Fail the step — user explicitly requested Linear integration
+        db.prepare("UPDATE steps SET status = 'error', output = ?, updated_at = datetime('now') WHERE id = ?").run(`Linear blank-slate failed: ${errMsg}`, step.id);
+        db.prepare("UPDATE runs SET status = 'error', updated_at = datetime('now') WHERE id = ?").run(step.run_id);
+        return { advanced: false, runCompleted: false };
+      }
+    }
+  }
+
   // T7: Loop step completion
   if (step.type === "loop" && step.current_story_id) {
     // Look up story info for event
@@ -617,6 +668,9 @@ export function completeStep(stepId: string, output: string): { advanced: boolea
     ).run(output, step.current_story_id);
     emitEvent({ ts: new Date().toISOString(), event: "story.done", runId: step.run_id, workflowId: getWorkflowId(step.run_id), stepId: step.step_id, storyId: storyRow?.story_id, storyTitle: storyRow?.title });
     logger.info(`Story done: ${storyRow?.story_id} — ${storyRow?.title}`, { runId: step.run_id, stepId: step.step_id });
+
+    // Linear hook: move issue to In Review
+    try { if (storyRow) onStoryDone(step.run_id, storyRow.story_id); } catch { /* best-effort */ }
 
     // Clear current_story_id, save output
     db.prepare(
@@ -667,6 +721,11 @@ export function completeStep(stepId: string, output: string): { advanced: boolea
   ).run(output, stepId);
   emitEvent({ ts: new Date().toISOString(), event: "step.done", runId: step.run_id, workflowId: getWorkflowId(step.run_id), stepId: step.step_id });
   logger.info(`Step completed: ${step.step_id}`, { runId: step.run_id, stepId: step.step_id });
+
+  // Linear hook: link PR when pr step completes
+  if (step.step_id === "pr" && parsed["pr"]) {
+    try { onPRCreated(step.run_id, parsed["pr"]); } catch { /* best-effort */ }
+  }
 
   return advancePipeline(step.run_id);
 }
@@ -901,6 +960,8 @@ export function failStep(stepId: string, error: string): { retrying: boolean; ru
         db.prepare("UPDATE stories SET status = 'failed', retry_count = ?, updated_at = datetime('now') WHERE id = ?").run(newRetry, story.id);
         db.prepare("UPDATE steps SET status = 'failed', output = ?, current_story_id = NULL, updated_at = datetime('now') WHERE id = ?").run(error, stepId);
         db.prepare("UPDATE runs SET status = 'failed', updated_at = datetime('now') WHERE id = ?").run(step.run_id);
+        // Linear hook: mark issue as failed
+        try { if (storyRow) onStoryFailed(step.run_id, storyRow.story_id, error); } catch { /* best-effort */ }
         const wfId = getWorkflowId(step.run_id);
         emitEvent({ ts: new Date().toISOString(), event: "story.failed", runId: step.run_id, workflowId: wfId, stepId: stepId, storyId: storyRow?.story_id, storyTitle: storyRow?.title, detail: error });
         emitEvent({ ts: new Date().toISOString(), event: "step.failed", runId: step.run_id, workflowId: wfId, stepId: stepId, detail: error });

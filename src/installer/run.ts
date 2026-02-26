@@ -5,12 +5,27 @@ import { getDb, nextRunNumber } from "../db.js";
 import { logger } from "../lib/logger.js";
 import { ensureWorkflowCrons } from "./agent-cron.js";
 import { emitEvent } from "./events.js";
+import {
+  exportProjectStories,
+  exportIssueStory,
+  ensureLabel,
+  applyLabel,
+  type LinearStory,
+  type LinearConfig,
+} from "./linear-hooks.js";
 
-export async function runWorkflow(params: {
+export interface RunWorkflowParams {
   workflowId: string;
   taskTitle: string;
   notifyUrl?: string;
-}): Promise<{ id: string; runNumber: number; workflowId: string; task: string; status: string }> {
+  storiesFrom?: string;   // "linear:<project-id>" or "linear-issue:<issue-id>"
+  repo?: string;           // explicit --repo flag
+  approve?: boolean;       // pause after export for human approval
+  linearTeam?: string;     // team ID for blank-slate mode
+  linearProject?: string;  // project ID for blank-slate mode
+}
+
+export async function runWorkflow(params: RunWorkflowParams): Promise<{ id: string; runNumber: number; workflowId: string; task: string; status: string }> {
   const workflowDir = resolveWorkflowDir(params.workflowId);
   const workflow = await loadWorkflowSpec(workflowDir);
   const db = getDb();
@@ -23,27 +38,107 @@ export async function runWorkflow(params: {
     ...workflow.context,
   };
 
+  // If --repo provided, inject into context
+  if (params.repo) {
+    initialContext["repo"] = params.repo;
+  }
+
+  // ── Linear pre-processing ──────────────────────────────────────────
+  let linearStories: LinearStory[] | null = null;
+  let linearMapping: Array<{ storyId: string; linearIssueId: string; linearIdentifier: string; teamId?: string }> | null = null;
+  let skipPlanStep = false;
+
+  if (params.storiesFrom) {
+    const [source, sourceId] = params.storiesFrom.split(":", 2);
+    if (!sourceId) {
+      throw new Error(`Invalid --stories-from format: "${params.storiesFrom}". Expected "linear:<project-id>" or "linear-issue:<issue-id>".`);
+    }
+
+    if (source === "linear") {
+      linearStories = exportProjectStories(sourceId);
+      skipPlanStep = true;
+    } else if (source === "linear-issue") {
+      linearStories = exportIssueStory(sourceId);
+      skipPlanStep = true;
+    } else {
+      throw new Error(`Unknown stories source: "${source}". Supported: "linear", "linear-issue".`);
+    }
+
+    // Ensure wbs/nick label and apply to imported issues
+    const labelId = ensureLabel("wbs/nick");
+    if (labelId) {
+      for (const s of linearStories) {
+        applyLabel(s.linearIssueId, labelId);
+      }
+    }
+
+    // Build Linear mapping for status sync hooks (include teamId for reliable state resolution)
+    linearMapping = linearStories.map(s => ({
+      storyId: s.id,
+      linearIssueId: s.linearIssueId,
+      linearIdentifier: s.linearIdentifier,
+      teamId: s.teamId,
+    }));
+
+    initialContext["linear_mapping"] = JSON.stringify(linearMapping);
+    initialContext["linear_source"] = params.storiesFrom;
+
+    logger.info(`Imported ${linearStories.length} stories from Linear (${params.storiesFrom})`, { workflowId: workflow.id });
+  }
+
+  // Blank-slate mode: planner runs, then we create Linear issues from output
+  if (!params.storiesFrom && params.linearTeam) {
+    initialContext["linear_blank_slate"] = "true";
+    initialContext["linear_team_id"] = params.linearTeam;
+    if (params.linearProject) {
+      initialContext["linear_project_id"] = params.linearProject;
+    }
+  }
+
+  // Determine initial run status
+  const runStatus = (params.approve && (linearStories || skipPlanStep)) ? "paused" : "running";
+
   db.exec("BEGIN");
   try {
     const notifyUrl = params.notifyUrl ?? workflow.notifications?.url ?? null;
     const insertRun = db.prepare(
-      "INSERT INTO runs (id, run_number, workflow_id, task, status, context, notify_url, created_at, updated_at) VALUES (?, ?, ?, ?, 'running', ?, ?, ?, ?)"
+      "INSERT INTO runs (id, run_number, workflow_id, task, status, context, notify_url, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
     );
-    insertRun.run(runId, runNumber, workflow.id, params.taskTitle, JSON.stringify(initialContext), notifyUrl, now, now);
+    insertRun.run(runId, runNumber, workflow.id, params.taskTitle, runStatus, JSON.stringify(initialContext), notifyUrl, now, now);
 
     const insertStep = db.prepare(
       "INSERT INTO steps (id, run_id, step_id, agent_id, step_index, input_template, expects, status, max_retries, type, loop_config, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
     );
 
+    // Filter steps: skip plan step if stories are pre-imported
+    let stepIndex = 0;
     for (let i = 0; i < workflow.steps.length; i++) {
       const step = workflow.steps[i];
+
+      // Skip plan step when stories come from Linear
+      if (skipPlanStep && step.id === "plan") {
+        continue;
+      }
+
       const stepUuid = crypto.randomUUID();
       const agentId = `${workflow.id}_${step.agent}`;
-      const status = i === 0 ? "pending" : "waiting";
+      const status = stepIndex === 0 ? (runStatus === "paused" ? "waiting" : "pending") : "waiting";
       const maxRetries = step.max_retries ?? step.on_fail?.max_retries ?? 2;
       const stepType = step.type ?? "single";
       const loopConfig = step.loop ? JSON.stringify(step.loop) : null;
-      insertStep.run(stepUuid, runId, step.id, agentId, i, step.input, step.expects, status, maxRetries, stepType, loopConfig, now, now);
+      insertStep.run(stepUuid, runId, step.id, agentId, stepIndex, step.input, step.expects, status, maxRetries, stepType, loopConfig, now, now);
+      stepIndex++;
+    }
+
+    // Insert pre-imported stories
+    if (linearStories) {
+      const insertStory = db.prepare(
+        "INSERT INTO stories (id, run_id, story_index, story_id, title, description, acceptance_criteria, status, retry_count, max_retries, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', 0, 2, ?, ?)"
+      );
+      for (let i = 0; i < linearStories.length; i++) {
+        const s = linearStories[i];
+        insertStory.run(crypto.randomUUID(), runId, i, s.id, s.title, s.description, JSON.stringify(s.acceptanceCriteria), now, now);
+      }
     }
 
     db.exec("COMMIT");
