@@ -169,7 +169,9 @@ function parseAcceptanceCriteria(description: string): string[] {
   }
 
   if (criteria.length > 0) {
-    criteria.push("Typecheck passes");
+    if (!criteria.some(c => c.toLowerCase() === "typecheck passes")) {
+      criteria.push("Typecheck passes");
+    }
     return criteria;
   }
 
@@ -180,7 +182,9 @@ function parseAcceptanceCriteria(description: string): string[] {
   }
 
   if (criteria.length > 0) {
-    criteria.push("Typecheck passes");
+    if (!criteria.some(c => c.toLowerCase() === "typecheck passes")) {
+      criteria.push("Typecheck passes");
+    }
     return criteria;
   }
 
