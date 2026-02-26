@@ -61,6 +61,7 @@ agents:
     name: Verifier
     role: verification
     description: Verifies the fix and regression test correctness.
+    model: anthropic/claude-opus-4-6
     workspace:
       baseDir: agents/verifier
       files:
@@ -299,8 +300,8 @@ steps:
       After creating the PR:
       1. Get the PR number from the output
       2. Trigger automated reviews by posting comments:
-         gh pr comment <number> --body "@greptile"
-         gh pr comment <number> --body "@codex"
+         gh pr comment <number> --body "@greptile review"
+         gh pr comment <number> --body "@codex review"
       3. Include the PR URL in your output
 
       Use: gh pr create

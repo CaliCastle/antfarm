@@ -78,7 +78,7 @@ agents:
     name: Verifier
     role: verification
     description: Quick sanity check - did developer actually do the work?
-    model: openai-codex/gpt-5.3-codex
+    model: anthropic/claude-opus-4-6
     workspace:
       baseDir: agents/verifier
       skills:
@@ -138,7 +138,7 @@ agents:
     name: Reviewer
     role: analysis
     description: Reviews PRs, requests changes or approves.
-    model: openai-codex/gpt-5.3-codex
+    model: anthropic/claude-opus-4-6
     workspace:
       baseDir: agents/reviewer
       skills:
@@ -425,8 +425,8 @@ steps:
       After creating the PR:
       1. Get the PR number from the output
       2. Trigger automated reviews by posting comments:
-         gh pr comment <number> --body "@greptile"
-         gh pr comment <number> --body "@codex"
+         gh pr comment <number> --body "@greptile review"
+         gh pr comment <number> --body "@codex review"
       3. Include the PR URL in your output
 
       Use: gh pr create
@@ -436,38 +436,6 @@ steps:
       PR: URL to the pull request
       PR_NUMBER: <number>
     expects: "STATUS: done"
-    on_fail:
-      escalate_to: human
-
-  - id: external-review-remediate
-    agent: developer
-    input: |
-      Address external PR review feedback (Greptile + Codex).
-
-      TASK: {{task}}
-      REPO: {{repo}}
-      WORKTREE: {{worktree}}
-      BRANCH: {{branch}}
-      PR: {{pr}}
-      PR_NUMBER: {{pr_number}}
-
-      Instructions:
-      1. Wait ~360 seconds for external reviewers to post feedback
-      2. Read PR comments: gh pr view {{pr_number}} --comments
-      3. If Greptile and/or Codex posted actionable feedback:
-         a. cd into {{worktree}} (git worktree)
-         b. Address each piece of actionable feedback
-         c. Commit: fix: address external review feedback
-         d. Push to the branch
-      4. If no feedback after waiting, or no actionable items, that's fine — skip
-
-      IMPORTANT: Do NOT change the repository's default branch. NEVER run `gh repo edit`.
-
-      Reply with:
-      STATUS: done
-      FIXES: What you fixed (or "no actionable feedback from Greptile/Codex")
-    expects: "STATUS: done"
-    max_retries: 1
     on_fail:
       escalate_to: human
 
@@ -530,3 +498,35 @@ steps:
       max_retries: 3
       on_exhausted:
         escalate_to: human
+
+  - id: external-review-remediate
+    agent: developer
+    input: |
+      Address external PR review feedback (Greptile + Codex).
+
+      TASK: {{task}}
+      REPO: {{repo}}
+      WORKTREE: {{worktree}}
+      BRANCH: {{branch}}
+      PR: {{pr}}
+      PR_NUMBER: {{pr_number}}
+
+      Instructions:
+      1. Wait ~360 seconds for external reviewers to post feedback
+      2. Read PR comments: gh pr view {{pr_number}} --comments
+      3. If Greptile and/or Codex posted actionable feedback:
+         a. cd into {{worktree}} (git worktree)
+         b. Address each piece of actionable feedback
+         c. Commit: fix: address external review feedback
+         d. Push to the branch
+      4. If no feedback after waiting, or no actionable items, that's fine — skip
+
+      IMPORTANT: Do NOT change the repository's default branch. NEVER run `gh repo edit`.
+
+      Reply with:
+      STATUS: done
+      FIXES: What you fixed (or "no actionable feedback from Greptile/Codex")
+    expects: "STATUS: done"
+    max_retries: 1
+    on_fail:
+      escalate_to: human
