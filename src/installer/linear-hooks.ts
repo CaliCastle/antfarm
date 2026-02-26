@@ -330,7 +330,7 @@ export function onStoryStarted(runId: string, storyId: string): void {
   const entry = mapping.get(storyId);
   if (!entry) return;
 
-  moveIssue(entry.linearIssueId, "In Progress", entry.teamId);
+  moveIssue(entry.linearIssueId, STATE_MAP["story.started"], entry.teamId);
   addComment(entry.linearIssueId, `🚀 Implementation started by antfarm`);
 }
 
@@ -344,7 +344,7 @@ export function onStoryDone(runId: string, storyId: string): void {
   const entry = mapping.get(storyId);
   if (!entry) return;
 
-  moveIssue(entry.linearIssueId, "In Review", entry.teamId);
+  moveIssue(entry.linearIssueId, STATE_MAP["story.done"], entry.teamId);
   addComment(entry.linearIssueId, `✅ Implementation complete, pending review`);
 }
 
@@ -356,7 +356,7 @@ export function onPRCreated(runId: string, prUrl: string): void {
   if (!mapping) return;
 
   for (const [, entry] of mapping) {
-    moveIssue(entry.linearIssueId, "Done", entry.teamId);
+    moveIssue(entry.linearIssueId, STATE_MAP["pr.created"], entry.teamId);
     linkPR(entry.linearIssueId, prUrl);
   }
 }
@@ -376,9 +376,6 @@ export function onStoryFailed(runId: string, storyId: string, error: string): vo
 
 // ── Label management ────────────────────────────────────────────────
 
-/**
- * Find or create the wbs/nick label, returning its ID.
- */
 /**
  * Apply a label to an existing Linear issue.
  */
