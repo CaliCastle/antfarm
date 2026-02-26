@@ -171,19 +171,39 @@ antfarm dashboard status       # Check status
 | Command | Description |
 |---------|-------------|
 | `antfarm workflow run <id> <task>` | Start a run |
+| `antfarm workflow run <id> <task> --repo <path>` | Start a run with explicit repo |
+| `antfarm workflow run <id> <task> --stories-from linear:<project-id>` | Import stories from Linear |
+| `antfarm workflow run <id> <task> --approve` | Pause after import for approval |
 | `antfarm workflow status <query>` | Check run status |
 | `antfarm workflow runs` | List all runs |
 | `antfarm workflow resume <run-id>` | Resume a failed run |
+| `antfarm workflow stop <run-id>` | Stop/cancel a running workflow |
 | `antfarm workflow list` | List available workflows |
 | `antfarm workflow install <id>` | Install a single workflow |
 | `antfarm workflow uninstall <id>` | Remove a single workflow |
+| `antfarm workflow ensure-crons <id>` | Recreate agent crons for a workflow |
 
 ### Management
 
 | Command | Description |
 |---------|-------------|
 | `antfarm dashboard` | Start the web dashboard |
+| `antfarm dashboard stop` | Stop the dashboard |
+| `antfarm dashboard status` | Check dashboard status |
 | `antfarm logs [<lines>]` | View recent log entries |
+| `antfarm logs <run-id>` | View logs for a specific run |
+| `antfarm version` | Show installed version |
+| `antfarm update` | Pull latest, rebuild, reinstall |
+
+### Medic (Watchdog)
+
+| Command | Description |
+|---------|-------------|
+| `antfarm medic install` | Install medic watchdog cron |
+| `antfarm medic uninstall` | Remove medic cron |
+| `antfarm medic run` | Run medic check now |
+| `antfarm medic status` | Show health summary |
+| `antfarm medic log [<count>]` | Recent medic check history |
 
 ---
 

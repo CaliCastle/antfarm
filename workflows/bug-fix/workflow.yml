@@ -9,7 +9,7 @@ description: |
   PR agent creates the pull request.
 
 polling:
-  model: default
+  model: kimi-coding/k2p5
   timeoutSeconds: 120
 
 agents:
@@ -73,6 +73,7 @@ agents:
     name: PR Creator
     role: pr
     description: Creates a pull request with bug fix details.
+    model: kimi-coding/k2p5
     workspace:
       baseDir: agents/pr
       files:

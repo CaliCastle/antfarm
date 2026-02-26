@@ -10,7 +10,7 @@ description: |
   Then integration/E2E testing, PR creation, and code review.
 
 polling:
-  model: google-gemini-cli/gemini-3-flash-preview
+  model: kimi-coding/k2p5
   timeoutSeconds: 120
 
 agents:
@@ -118,7 +118,7 @@ agents:
     name: PR Creator
     role: pr
     description: Creates a pull request with comprehensive feature documentation.
-    model: anthropic/claude-opus-4-6
+    model: kimi-coding/k2p5
     workspace:
       baseDir: agents/pr
       skills:
