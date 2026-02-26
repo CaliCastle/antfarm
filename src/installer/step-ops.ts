@@ -8,9 +8,13 @@ import { execSync, execFileSync } from "node:child_process";
 import { teardownWorkflowCronsIfIdle } from "./agent-cron.js";
 import { emitEvent } from "./events.js";
 import { logger } from "../lib/logger.js";
+import { sendSessionMessage } from "./gateway-api.js";
 import { getMaxRoleTimeoutSeconds } from "./install.js";
+import { loadWorkflowSpec } from "./workflow-spec.js";
+import { resolveWorkflowDir } from "./paths.js";
 import { isFrontendChange } from "../lib/frontend-detect.js";
 import { onStoryStarted, onStoryDone, onStoryFailed, onPRCreated, createLinearIssues, ensureLabel } from "./linear-hooks.js";
+import type { WorkflowStepFailure } from "./types.js";
 
 /**
  * Parse KEY: value lines from step output with support for multi-line values.
@@ -1013,6 +1017,51 @@ function advancePipeline(runId: string): { advanced: boolean; runCompleted: bool
   }
 }
 
+function resolveEscalationTarget(policy: WorkflowStepFailure | null): string | null {
+  const escalateTo = policy?.on_exhausted?.escalate_to || policy?.escalate_to;
+  if (!escalateTo) return null;
+
+  const normalized = escalateTo.trim().toLowerCase();
+  if (normalized === "human" || normalized === "main") return "agent:main:main";
+  if (normalized.startsWith("agent:")) return escalateTo;
+  return null;
+}
+
+async function getOnFailPolicy(runId: string, stepId: string): Promise<WorkflowStepFailure | null> {
+  try {
+    const db = getDb();
+    const run = db.prepare("SELECT workflow_id FROM runs WHERE id = ?").get(runId) as { workflow_id: string } | undefined;
+    if (!run) return null;
+
+    const workflowDir = resolveWorkflowDir(run.workflow_id);
+    const workflow = await loadWorkflowSpec(workflowDir);
+    const step = workflow.steps.find((s) => s.id === stepId);
+    return step?.on_fail ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function notifyFailureExhausted(runId: string, stepId: string, reason: string): Promise<void> {
+  try {
+    const policy = await getOnFailPolicy(runId, stepId);
+    const sessionKey = resolveEscalationTarget(policy);
+    if (!sessionKey) return;
+
+    const wfId = getWorkflowId(runId) ?? "unknown";
+    const message = `Antfarm alert: step "${stepId}" exhausted retries in run ${runId.slice(0, 8)} (${wfId}). Reason: ${reason}`;
+    const result = await sendSessionMessage({ sessionKey, message });
+    if (!result.ok) {
+      logger.warn(`Failed to send escalation message: ${result.error ?? "unknown error"}`, {
+        runId,
+        stepId,
+      });
+    }
+  } catch {
+    // escalation should never block pipeline completion
+  }
+}
+
 // ── Fail ────────────────────────────────────────────────────────────
 
 // ─── Progress Archiving (T15) ────────────────────────────────────────
@@ -1042,12 +1091,19 @@ export function archiveRunProgress(runId: string): void {
 /**
  * Fail a step, with retry logic. For loop steps, applies per-story retry.
  */
-export function failStep(stepId: string, error: string): { retrying: boolean; runFailed: boolean } {
+export async function failStep(stepId: string, error: string): Promise<{ retrying: boolean; runFailed: boolean }> {
   const db = getDb();
 
   const step = db.prepare(
-    "SELECT run_id, retry_count, max_retries, type, current_story_id FROM steps WHERE id = ?"
-  ).get(stepId) as { run_id: string; retry_count: number; max_retries: number; type: string; current_story_id: string | null } | undefined;
+    "SELECT run_id, step_id, retry_count, max_retries, type, current_story_id FROM steps WHERE id = ?"
+  ).get(stepId) as {
+    run_id: string;
+    step_id: string;
+    retry_count: number;
+    max_retries: number;
+    type: string;
+    current_story_id: string | null;
+  } | undefined;
 
   if (!step) throw new Error(`Step not found: ${stepId}`);
 
@@ -1072,6 +1128,7 @@ export function failStep(stepId: string, error: string): { retrying: boolean; ru
         emitEvent({ ts: new Date().toISOString(), event: "step.failed", runId: step.run_id, workflowId: wfId, stepId: stepId, detail: error });
         emitEvent({ ts: new Date().toISOString(), event: "run.failed", runId: step.run_id, workflowId: wfId, detail: "Story retries exhausted" });
         scheduleRunCronTeardown(step.run_id);
+        await notifyFailureExhausted(step.run_id, step.step_id, error);
         return { retrying: false, runFailed: true };
       }
 
@@ -1096,6 +1153,7 @@ export function failStep(stepId: string, error: string): { retrying: boolean; ru
     emitEvent({ ts: new Date().toISOString(), event: "step.failed", runId: step.run_id, workflowId: wfId2, stepId: stepId, detail: error });
     emitEvent({ ts: new Date().toISOString(), event: "run.failed", runId: step.run_id, workflowId: wfId2, detail: "Step retries exhausted" });
     scheduleRunCronTeardown(step.run_id);
+    await notifyFailureExhausted(step.run_id, step.step_id, error);
     return { retrying: false, runFailed: true };
   } else {
     db.prepare(
