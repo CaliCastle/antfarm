@@ -89,6 +89,25 @@ export function resolveTemplate(template: string, context: Record<string, string
 }
 
 /**
+ * Find missing template placeholders for a given context object.
+ */
+function findMissingTemplateKeys(template: string, context: Record<string, string>): string[] {
+  const missing: string[] = [];
+  const seen = new Set<string>();
+  template.replace(/\{\{(\w+(?:\.\w+)*)\}\}/g, (_match, key: string) => {
+    const lower = key.toLowerCase();
+    const hasExact = Object.prototype.hasOwnProperty.call(context, key);
+    const hasLower = Object.prototype.hasOwnProperty.call(context, lower);
+    if (!hasExact && !hasLower && !seen.has(lower)) {
+      seen.add(lower);
+      missing.push(lower);
+    }
+    return "";
+  });
+  return missing;
+}
+
+/**
  * Get the workspace path for an OpenClaw agent by its id.
  */
 function getAgentWorkspacePath(agentId: string): string | null {
@@ -381,6 +400,47 @@ export function computeHasFrontendChanges(repo: string, branch: string): string 
   }
 }
 
+function failStepWithMissingInputs(
+  stepDbId: string,
+  stepPublicId: string,
+  runId: string,
+  missingKeys: string[],
+): void {
+  const db = getDb();
+  const wfId = getWorkflowId(runId);
+  const message = `Step input is not ready: missing required template key(s) ${missingKeys.join(", ")}`;
+
+  db.prepare(
+    "UPDATE steps SET status = 'failed', output = ?, updated_at = datetime('now') WHERE id = ?"
+  ).run(message, stepDbId);
+  db.prepare("UPDATE runs SET status = 'failed', updated_at = datetime('now') WHERE id = ?").run(runId);
+
+  emitEvent({
+    ts: new Date().toISOString(),
+    event: "step.failed",
+    runId,
+    workflowId: wfId,
+    stepId: stepPublicId,
+    detail: message,
+  });
+  emitEvent({
+    ts: new Date().toISOString(),
+    event: "run.failed",
+    runId,
+    workflowId: wfId,
+    detail: message,
+  });
+  scheduleRunCronTeardown(runId);
+}
+
+function runHasStories(runId: string): boolean {
+  const db = getDb();
+  const total = db.prepare(
+    "SELECT COUNT(*) as cnt FROM stories WHERE run_id = ?"
+  ).get(runId) as { cnt: number } | undefined;
+  return (total?.cnt ?? 0) > 0;
+}
+
 // ── Peek (lightweight work check) ───────────────────────────────────
 
 export type PeekResult = "HAS_WORK" | "NO_WORK";
@@ -429,13 +489,24 @@ export function claimStep(agentId: string): ClaimResult {
   const db = getDb();
 
   const step = db.prepare(
-    `SELECT s.id, s.step_id, s.run_id, s.input_template, s.type, s.loop_config
+    `SELECT s.id, s.step_id, s.run_id, s.input_template, s.type, s.loop_config, s.step_index
      FROM steps s
      JOIN runs r ON r.id = s.run_id
      WHERE s.agent_id = ? AND s.status = 'pending'
        AND r.status NOT IN ('failed', 'cancelled')
+       AND NOT EXISTS (
+         SELECT 1 FROM steps prev
+         WHERE prev.run_id = s.run_id
+           AND prev.step_index < s.step_index
+           AND prev.status NOT IN ('done', 'skipped')
+       )
+    ORDER BY s.step_index ASC, s.step_id ASC
      LIMIT 1`
-  ).get(agentId) as { id: string; step_id: string; run_id: string; input_template: string; type: string; loop_config: string | null } | undefined;
+  ).get(agentId) as {
+    id: string; step_id: string; run_id: string; input_template: string; type: string;
+    loop_config: string | null;
+    step_index: number;
+  } | undefined;
 
   if (!step) return { found: false };
 
@@ -461,6 +532,21 @@ export function claimStep(agentId: string): ClaimResult {
   if (step.type === "loop") {
     const loopConfig: LoopConfig | null = step.loop_config ? JSON.parse(step.loop_config) : null;
     if (loopConfig?.over === "stories") {
+      if (!runHasStories(step.run_id)) {
+        const message = "Loop cannot run because planning did not produce STORIES_JSON.";
+        db.prepare(
+          "UPDATE steps SET status = 'failed', output = ?, updated_at = datetime('now') WHERE id = ?"
+        ).run(message, step.id);
+        db.prepare(
+          "UPDATE runs SET status = 'failed', updated_at = datetime('now') WHERE id = ?"
+        ).run(step.run_id);
+        const wfId = getWorkflowId(step.run_id);
+        emitEvent({ ts: new Date().toISOString(), event: "step.failed", runId: step.run_id, workflowId: wfId, stepId: step.step_id, agentId: agentId, detail: message });
+        emitEvent({ ts: new Date().toISOString(), event: "run.failed", runId: step.run_id, workflowId: wfId, detail: message });
+        scheduleRunCronTeardown(step.run_id);
+        return { found: false };
+      }
+
       // Find next pending story
       const nextStory = db.prepare(
         "SELECT * FROM stories WHERE run_id = ? AND status = 'pending' ORDER BY story_index ASC LIMIT 1"
@@ -540,6 +626,12 @@ export function claimStep(agentId: string): ClaimResult {
         context["verify_feedback"] = "";
       }
 
+      const missingKeys = findMissingTemplateKeys(step.input_template, context);
+      if (missingKeys.length > 0) {
+        failStepWithMissingInputs(step.id, step.step_id, step.run_id, missingKeys);
+        return { found: false };
+      }
+
       // Persist story context vars to DB so verify_each steps can access them
       db.prepare("UPDATE runs SET context = ?, updated_at = datetime('now') WHERE id = ?").run(JSON.stringify(context), step.run_id);
 
@@ -561,6 +653,12 @@ export function claimStep(agentId: string): ClaimResult {
   ).get(step.run_id) as { cnt: number };
   if (hasStories.cnt > 0) {
     context["progress"] = readProgressFile(step.run_id);
+  }
+
+  const missingKeys = findMissingTemplateKeys(step.input_template, context);
+  if (missingKeys.length > 0) {
+    failStepWithMissingInputs(step.id, step.step_id, step.run_id, missingKeys);
+    return { found: false };
   }
 
   const resolvedInput = resolveTemplate(step.input_template, context);
@@ -873,6 +971,13 @@ function advancePipeline(runId: string): { advanced: boolean; runCompleted: bool
   // Guard: don't advance or complete a run that's already failed/cancelled
   const runStatus = db.prepare("SELECT status FROM runs WHERE id = ?").get(runId) as { status: string } | undefined;
   if (runStatus?.status === "failed" || runStatus?.status === "cancelled") {
+    return { advanced: false, runCompleted: false };
+  }
+
+  const runningStep = db.prepare(
+    "SELECT id FROM steps WHERE run_id = ? AND status = 'running' LIMIT 1"
+  ).get(runId) as { id: string } | undefined;
+  if (runningStep) {
     return { advanced: false, runCompleted: false };
   }
 

@@ -151,8 +151,8 @@ export async function createAgentCronJob(job: {
       args.push("--model", job.payload.model);
     }
 
-    if (job.delivery?.mode === "none") {
-      args.push("--delivery", "none");
+    if (job.delivery?.mode === "announce") {
+      args.push("--announce");
     }
 
     if (!job.enabled) {
