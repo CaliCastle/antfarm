@@ -97,7 +97,7 @@ steps:
                 isResolved
                 line
                 path
-                comments(first:20) {
+                comments(first:100) {
                   nodes {
                     id
                     databaseId
@@ -118,6 +118,7 @@ steps:
       ```
 
       Keep requesting pages while `hasNextPage` is true, passing `endCursor` as `AFTER`.
+      This fetches up to 100 comments per thread so actionable replies later in long discussions are not missed.
 
       Reply with:
       STATUS: done
@@ -212,7 +213,11 @@ steps:
 
       After resolving/replying to all threads:
       4. Re-request review from ALL human reviewers:
-         gh pr edit {{pr_number}} --repo {{owner}}/{{repo_name}} --add-reviewer REVIEWER1,REVIEWER2
+         if [ -n "{{reviewers}}" ]; then
+           gh pr edit {{pr_number}} --repo {{owner}}/{{repo_name}} --add-reviewer {{reviewers}}
+         else
+           echo "No human reviewers available; skipping re-request step."
+         fi
 
       Reply with:
       STATUS: done
@@ -238,24 +243,41 @@ steps:
 
       Instructions:
       1. cd into REPO_PATH and get latest commit: git log --oneline -1
-      2. Check current thread status on the PR using GraphQL:
+      2. Check current thread status on the PR using GraphQL with pagination:
          ```
-         gh api graphql -f query='
-         query($owner:String!, $repo:String!, $pr:Int!) {
+         AFTER=""
+         TOTAL_UNRESOLVED=0
+         while :; do
+           RESP=$(gh api graphql -f query='
+         query($owner:String!, $repo:String!, $pr:Int!, $after:String) {
            repository(owner:$owner, name:$repo) {
              pullRequest(number:$pr) {
-               reviewThreads(first:100) {
+               reviewThreads(first:100, after:$after) {
                  nodes {
                    isResolved
+                 }
+                 pageInfo {
+                   hasNextPage
+                   endCursor
                  }
                }
              }
            }
-         }' -f owner="OWNER" -f repo="REPO_NAME" -F pr=PR_NUMBER
+         }' -f owner="OWNER" -f repo="REPO_NAME" -F pr=PR_NUMBER -f after="$AFTER")
+         PAGE=$(echo "$RESP" | jq '.data.repository.pullRequest.reviewThreads.nodes')
+         PAGE_UNRESOLVED=$(echo "$PAGE" | jq '[.[] | select(.isResolved == false)] | length')
+         TOTAL_UNRESOLVED=$((TOTAL_UNRESOLVED + PAGE_UNRESOLVED))
+         HAS_NEXT=$(echo "$RESP" | jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.hasNextPage')
+         AFTER=$(echo "$RESP" | jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.endCursor')
+         if [ "$HAS_NEXT" != "true" ]; then
+           break
+         fi
+         done
+         echo "UNRESOLVED_THREADS: $TOTAL_UNRESOLVED"
          ```
       3. Trigger Greptile re-review:
          gh pr comment PR_NUMBER --repo OWNER/REPO_NAME --body "@greptileai review"
-      4. Build a summary of what happened this round.
+      4. Include `UNRESOLVED_THREADS` in the final summary.
 
       Reply with:
       STATUS: done
