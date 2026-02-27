@@ -275,8 +275,14 @@ steps:
          done
          echo "UNRESOLVED_THREADS: $TOTAL_UNRESOLVED"
          ```
-      3. Trigger Greptile re-review:
-         gh pr comment PR_NUMBER --repo OWNER/REPO_NAME --body "@greptileai review"
+      3. Trigger Greptile re-review (skip if already triggered since last commit):
+         ```bash
+         LAST_COMMIT_DATE=$(cd REPO_PATH && git log -1 --format=%cI)
+         ALREADY_TRIGGERED=$(gh api repos/OWNER/REPO_NAME/issues/PR_NUMBER/comments --jq '[.[] | select(.body == "@greptileai review" and .created_at > "'$LAST_COMMIT_DATE'")] | length')
+         if [ "$ALREADY_TRIGGERED" = "0" ]; then
+           gh pr comment PR_NUMBER --repo OWNER/REPO_NAME --body "@greptileai review"
+         fi
+         ```
       4. Include `UNRESOLVED_THREADS` in the final summary.
 
       Reply with:
