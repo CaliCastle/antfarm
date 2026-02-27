@@ -77,7 +77,7 @@ steps:
       1. Parse PR reference from the task (owner/repo#N or repo path + PR number)
       2. Clone or update the local repo under ~/Projects/<repo-name>
       3. Check out the PR's head branch and pull latest
-      4. Use GraphQL to fetch ALL unresolved review threads with full comment bodies
+      4. Use GraphQL with pagination to fetch ALL review threads (not just first 100) with full comment bodies
       5. Classify each thread:
          - Bot (greptileai, greptile-apps, coderabbitai, github-actions, copilot, ends with [bot]): actionable, auto-resolve after fix
          - Human actionable (imperative language, suggestions, code changes requested): actionable, reply-only after fix
@@ -87,11 +87,11 @@ steps:
       GraphQL query to use:
       ```
       gh api graphql -f query='
-      query($owner:String!, $repo:String!, $pr:Int!) {
+      query($owner:String!, $repo:String!, $pr:Int!, $after:String) {
         repository(owner:$owner, name:$repo) {
           pullRequest(number:$pr) {
             headRefName
-            reviewThreads(first:100) {
+            reviewThreads(first:100, after:$after) {
               nodes {
                 id
                 isResolved
@@ -107,11 +107,17 @@ steps:
                   }
                 }
               }
+              pageInfo {
+                hasNextPage
+                endCursor
+              }
             }
           }
         }
-      }' -f owner="$OWNER" -f repo="$REPO" -F pr=$PR
+      }' -f owner="$OWNER" -f repo="$REPO" -F pr=$PR -f after="$AFTER"
       ```
+
+      Keep requesting pages while `hasNextPage` is true, passing `endCursor` as `AFTER`.
 
       Reply with:
       STATUS: done
@@ -184,6 +190,7 @@ steps:
       REPO_NAME: {{repo_name}}
       PR_NUMBER: {{pr_number}}
       BRANCH: {{branch}}
+      REPO_PATH: {{repo_path}}
       COMMIT: (get from git log in REPO_PATH — run: cd REPO_PATH && git log --oneline -1)
       CHANGES: {{changes}}
 
@@ -231,8 +238,21 @@ steps:
 
       Instructions:
       1. cd into REPO_PATH and get latest commit: git log --oneline -1
-      2. Check current thread status on the PR:
-         gh api graphql to count resolved vs unresolved threads
+      2. Check current thread status on the PR using GraphQL:
+         ```
+         gh api graphql -f query='
+         query($owner:String!, $repo:String!, $pr:Int!) {
+           repository(owner:$owner, name:$repo) {
+             pullRequest(number:$pr) {
+               reviewThreads(first:100) {
+                 nodes {
+                   isResolved
+                 }
+               }
+             }
+           }
+         }' -f owner="OWNER" -f repo="REPO_NAME" -F pr=PR_NUMBER
+         ```
       3. Trigger Greptile re-review:
          gh pr comment PR_NUMBER --repo OWNER/REPO_NAME --body "@greptileai review"
       4. Build a summary of what happened this round.
