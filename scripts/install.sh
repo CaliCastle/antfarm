@@ -22,14 +22,20 @@ cd "$DEST"
 
 # Build
 echo "Installing dependencies..."
-npm install --no-fund --no-audit
+if command -v pnpm &>/dev/null; then
+  pnpm install --frozen-lockfile
+else
+  echo "pnpm not found — installing via corepack..."
+  corepack enable && corepack prepare pnpm@latest --activate
+  pnpm install --frozen-lockfile
+fi
 
 echo "Building..."
-npm run build
+pnpm run build
 
 # Link CLI globally
 echo "Linking CLI..."
-npm link
+pnpm link --global
 
 # Install workflows — use linked CLI or fall back to direct node
 ANTFARM="$(command -v antfarm 2>/dev/null || echo "")"

@@ -9,7 +9,7 @@ description: |
   Verifier confirms each fix. Tester runs final integration validation. PR agent creates the pull request.
 
 polling:
-  model: default
+  model: anthropic/claude-sonnet-4-6
   timeoutSeconds: 120
 
 agents:
