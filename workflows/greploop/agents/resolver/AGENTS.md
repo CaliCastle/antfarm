@@ -49,6 +49,6 @@ SKIPPED_THREADS: <list or "none">
 ```
 
 ## Important
-- Never skip the re-request review step
+- Re-request reviews when reviewers are available (skip if REVIEWERS is empty)
 - Never resolve human_question threads
 - Always include the commit hash in replies

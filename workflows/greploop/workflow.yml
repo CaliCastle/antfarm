@@ -207,7 +207,9 @@ steps:
          gh api graphql -f query='mutation($id:ID!) { resolveReviewThread(input:{threadId:$id}) { thread { isResolved } } }' -f id="THREAD_ID"
 
       2. Human actionable threads (classification: human_fix) -> resolve via GraphQL (same as bot) AND reply with commit hash:
-         gh api -X POST repos/{{owner}}/{{repo_name}}/pulls/comments/DATABASE_ID/replies -f body='Fixed in COMMIT. @AUTHOR please verify.'
+         gh api -X POST repos/{{owner}}/{{repo_name}}/pulls/comments/$DATABASE_ID/replies -f body="Fixed in \`$COMMIT\`. @$AUTHOR please verify."
+
+         Replace $DATABASE_ID with the thread's databaseId, $COMMIT with the commit hash from step 1 of the resolver, and $AUTHOR with the thread's author login.
 
       3. Human question threads (classification: human_question) -> SKIP, do not resolve or reply.
 
@@ -263,7 +265,7 @@ steps:
                }
              }
            }
-         }' -f owner="OWNER" -f repo="REPO_NAME" -F pr=PR_NUMBER -f after="$AFTER")
+         }' -f owner="{{owner}}" -f repo="{{repo_name}}" -F pr={{pr_number}} -f after="$AFTER")
          PAGE=$(echo "$RESP" | jq '.data.repository.pullRequest.reviewThreads.nodes')
          PAGE_UNRESOLVED=$(echo "$PAGE" | jq '[.[] | select(.isResolved == false)] | length')
          TOTAL_UNRESOLVED=$((TOTAL_UNRESOLVED + PAGE_UNRESOLVED))
@@ -277,17 +279,21 @@ steps:
          ```
       3. Trigger Greptile re-review (skip if already triggered since last commit):
          ```bash
-         LAST_COMMIT_DATE=$(cd REPO_PATH && git log -1 --format=%cI)
-         ALREADY_TRIGGERED=$(gh api repos/OWNER/REPO_NAME/issues/PR_NUMBER/comments --jq '[.[] | select(.body == "@greptileai review" and .created_at > "'$LAST_COMMIT_DATE'")] | length')
+         LAST_COMMIT_DATE=$(cd {{repo_path}} && git log -1 --format=%cI)
+         ALREADY_TRIGGERED=$(gh api repos/{{owner}}/{{repo_name}}/issues/{{pr_number}}/comments --jq '[.[] | select(.body == "@greptileai review" and .created_at > "'$LAST_COMMIT_DATE'")] | length')
          if [ "$ALREADY_TRIGGERED" = "0" ]; then
-           gh pr comment PR_NUMBER --repo OWNER/REPO_NAME --body "@greptileai review"
+           gh pr comment {{pr_number}} --repo {{owner}}/{{repo_name}} --body "@greptileai review"
          fi
          ```
-      4. Include `UNRESOLVED_THREADS` in the final summary.
+      4. Build a summary including:
+         - Latest commit hash and message
+         - `UNRESOLVED_THREADS` count (from step 2)
+         - Whether re-review was triggered or skipped
+         - Branch name
 
       Reply with:
       STATUS: done
-      SUMMARY: a clean multi-line summary suitable for Slack
+      SUMMARY: a clean multi-line summary including commit, unresolved thread count, and re-review status — suitable for Slack
     expects: "STATUS: done"
     on_fail:
       escalate_to: human
