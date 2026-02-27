@@ -1,0 +1,299 @@
+id: greploop
+name: PR Review Fix Loop
+version: 1
+description: |
+  Automated PR review remediation loop. Fetches unresolved review threads,
+  classifies them (bot vs human, actionable vs discussion), fixes the code,
+  resolves threads, re-requests reviews, and loops until clean.
+  Supports Greptile, CodeRabbit, Copilot, and human reviewers.
+
+polling:
+  model: kimi-coding/k2p5
+  timeoutSeconds: 120
+
+agents:
+  - id: fetcher
+    name: Thread Fetcher
+    role: analysis
+    description: Fetches unresolved PR review threads and classifies them.
+    timeoutSeconds: 300
+    model: kimi-coding/k2p5
+    workspace:
+      baseDir: agents/fetcher
+      files:
+        AGENTS.md: agents/fetcher/AGENTS.md
+        SOUL.md: agents/fetcher/SOUL.md
+        IDENTITY.md: agents/fetcher/IDENTITY.md
+
+  - id: fixer
+    name: Code Fixer
+    role: coding
+    description: Fixes all actionable review comments, builds, commits, pushes.
+    timeoutSeconds: 1800
+    model: openai-codex/gpt-5.3-codex
+    workspace:
+      baseDir: agents/fixer
+      files:
+        AGENTS.md: agents/fixer/AGENTS.md
+        SOUL.md: agents/fixer/SOUL.md
+        IDENTITY.md: agents/fixer/IDENTITY.md
+
+  - id: resolver
+    name: Thread Resolver
+    role: pr
+    description: Resolves bot threads, replies to human threads, re-requests reviews.
+    timeoutSeconds: 600
+    model: openai-codex/gpt-5.3-codex
+    workspace:
+      baseDir: agents/resolver
+      files:
+        AGENTS.md: agents/resolver/AGENTS.md
+        SOUL.md: agents/resolver/SOUL.md
+        IDENTITY.md: agents/resolver/IDENTITY.md
+
+  - id: reporter
+    name: Reporter
+    role: analysis
+    description: Posts summary report and triggers re-review.
+    timeoutSeconds: 300
+    model: anthropic/claude-opus-4-6
+    workspace:
+      baseDir: agents/reporter
+      files:
+        AGENTS.md: agents/reporter/AGENTS.md
+        SOUL.md: agents/reporter/SOUL.md
+        IDENTITY.md: agents/reporter/IDENTITY.md
+
+steps:
+  - id: fetch
+    agent: fetcher
+    input: |
+      Fetch and classify all unresolved review threads on a PR.
+
+      TASK:
+      {{task}}
+
+      Instructions:
+      1. Parse PR reference from the task (owner/repo#N or repo path + PR number)
+      2. Clone or update the local repo under ~/Projects/<repo-name>
+      3. Check out the PR's head branch and pull latest
+      4. Use GraphQL with pagination to fetch ALL review threads (not just first 100) with full comment bodies
+      5. Classify each thread:
+         - Bot (greptileai, greptile-apps, coderabbitai, github-actions, copilot, ends with [bot]): actionable, auto-resolve after fix
+         - Human actionable (imperative language, suggestions, code changes requested): actionable, reply-only after fix
+         - Human question/discussion (questions, "should we", "what about"): skip, needs human input
+      6. Output the full classification
+
+      GraphQL query to use:
+      ```
+      gh api graphql -f query='
+      query($owner:String!, $repo:String!, $pr:Int!, $after:String) {
+        repository(owner:$owner, name:$repo) {
+          pullRequest(number:$pr) {
+            headRefName
+            reviewThreads(first:100, after:$after) {
+              nodes {
+                id
+                isResolved
+                line
+                path
+                comments(first:100) {
+                  nodes {
+                    id
+                    databaseId
+                    body
+                    author { login }
+                    createdAt
+                  }
+                }
+              }
+              pageInfo {
+                hasNextPage
+                endCursor
+              }
+            }
+          }
+        }
+      }' -f owner="$OWNER" -f repo="$REPO" -F pr=$PR -f after="$AFTER"
+      ```
+
+      Keep requesting pages while `hasNextPage` is true, passing `endCursor` as `AFTER`.
+      This fetches up to 100 comments per thread so actionable replies later in long discussions are not missed.
+
+      Reply with:
+      STATUS: done
+      OWNER: github org/owner
+      REPO_NAME: repo name (just the name, not owner/name)
+      PR_NUMBER: the PR number
+      BRANCH: the head branch name
+      REPO_PATH: local path to repo
+      THREADS_JSON: JSON array of classified threads, each with: { threadId, path, line, classification (bot|human_fix|human_question), author, body, databaseId (of first comment) }
+      BOT_COUNT: number of bot threads
+      HUMAN_FIX_COUNT: number of human actionable threads
+      HUMAN_QUESTION_COUNT: number of human question/discussion threads
+      REVIEWERS: comma-separated list of unique human reviewers who left actionable comments
+
+      If zero unresolved threads, reply:
+      STATUS: clean
+      (and include OWNER, REPO_NAME, PR_NUMBER, BRANCH, REPO_PATH with empty THREADS_JSON: [])
+    expects: "STATUS:"
+    max_retries: 2
+    on_fail:
+      escalate_to: human
+
+  - id: fix
+    agent: fixer
+    input: |
+      Fix all actionable review comments on this PR.
+
+      TASK: {{task}}
+      OWNER: {{owner}}
+      REPO_NAME: {{repo_name}}
+      PR_NUMBER: {{pr_number}}
+      BRANCH: {{branch}}
+      REPO_PATH: {{repo_path}}
+
+      THREADS TO FIX (JSON):
+      {{threads_json}}
+
+      Instructions:
+      1. cd into {{repo_path}}, ensure you're on {{branch}} and up to date
+      2. For EACH actionable thread (classification: bot or human_fix):
+         - Read the file at the specified path
+         - Apply the requested change
+         - If the thread includes a GitHub suggestion block, apply it exactly
+      3. After ALL fixes:
+         - Detect build tool from package.json (pnpm build / npm run build / npx tsc --noEmit)
+         - Run the build and fix any issues
+         - Commit: fix: address PR review feedback
+         - Push to origin/{{branch}}
+      4. Get the commit hash: git log --oneline -1
+
+      Reply with:
+      STATUS: done
+      COMMIT: the short commit hash
+      CHANGES: summary of what was changed
+
+      If no actionable threads (all were questions):
+      STATUS: skip
+      CHANGES: no actionable threads to fix
+    expects: "STATUS:"
+    max_retries: 2
+    on_fail:
+      escalate_to: human
+
+  - id: resolve
+    agent: resolver
+    input: |
+      Resolve threads and reply to human comments on the PR.
+
+      OWNER: {{owner}}
+      REPO_NAME: {{repo_name}}
+      PR_NUMBER: {{pr_number}}
+      BRANCH: {{branch}}
+      REPO_PATH: {{repo_path}}
+      COMMIT: (get from git log in REPO_PATH — run: cd REPO_PATH && git log --oneline -1)
+      CHANGES: {{changes}}
+
+      THREADS (JSON):
+      {{threads_json}}
+
+      REVIEWERS: {{reviewers}}
+
+      Instructions:
+      For each thread in THREADS_JSON:
+
+      1. Bot threads (classification: bot) -> resolve via GraphQL:
+         gh api graphql -f query='mutation($id:ID!) { resolveReviewThread(input:{threadId:$id}) { thread { isResolved } } }' -f id="THREAD_ID"
+
+      2. Human actionable threads (classification: human_fix) -> resolve via GraphQL (same as bot) AND reply with commit hash:
+         gh api -X POST repos/{{owner}}/{{repo_name}}/pulls/comments/$DATABASE_ID/replies -f body="Fixed in \`$COMMIT\`. @$AUTHOR please verify."
+
+         Replace $DATABASE_ID with the thread's databaseId, $COMMIT with the commit hash from step 1 of the resolver, and $AUTHOR with the thread's author login.
+
+      3. Human question threads (classification: human_question) -> SKIP, do not resolve or reply.
+
+      After resolving/replying to all threads:
+      4. Re-request review from ALL human reviewers:
+         if [ -n "{{reviewers}}" ]; then
+           gh pr edit {{pr_number}} --repo {{owner}}/{{repo_name}} --add-reviewer {{reviewers}}
+         else
+           echo "No human reviewers available; skipping re-request step."
+         fi
+
+      Reply with:
+      STATUS: done
+      RESOLVED_COUNT: number of threads resolved
+      REPLIED_COUNT: number of human threads replied to
+      SKIPPED_COUNT: number of threads skipped (questions)
+      SKIPPED_THREADS: list of skipped threads (author, path, truncated body) or "none"
+    expects: "STATUS: done"
+    max_retries: 2
+    on_fail:
+      escalate_to: human
+
+  - id: report
+    agent: reporter
+    input: |
+      Post summary and trigger re-review.
+
+      OWNER: {{owner}}
+      REPO_NAME: {{repo_name}}
+      PR_NUMBER: {{pr_number}}
+      REPO_PATH: {{repo_path}}
+      BRANCH: {{branch}}
+
+      Instructions:
+      1. cd into REPO_PATH and get latest commit: git log --oneline -1
+      2. Check current thread status on the PR using GraphQL with pagination:
+         ```
+         AFTER=""
+         TOTAL_UNRESOLVED=0
+         while :; do
+           RESP=$(gh api graphql -f query='
+         query($owner:String!, $repo:String!, $pr:Int!, $after:String) {
+           repository(owner:$owner, name:$repo) {
+             pullRequest(number:$pr) {
+               reviewThreads(first:100, after:$after) {
+                 nodes {
+                   isResolved
+                 }
+                 pageInfo {
+                   hasNextPage
+                   endCursor
+                 }
+               }
+             }
+           }
+         }' -f owner="{{owner}}" -f repo="{{repo_name}}" -F pr={{pr_number}} -f after="$AFTER")
+         PAGE=$(echo "$RESP" | jq '.data.repository.pullRequest.reviewThreads.nodes')
+         PAGE_UNRESOLVED=$(echo "$PAGE" | jq '[.[] | select(.isResolved == false)] | length')
+         TOTAL_UNRESOLVED=$((TOTAL_UNRESOLVED + PAGE_UNRESOLVED))
+         HAS_NEXT=$(echo "$RESP" | jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.hasNextPage')
+         AFTER=$(echo "$RESP" | jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.endCursor')
+         if [ "$HAS_NEXT" != "true" ]; then
+           break
+         fi
+         done
+         echo "UNRESOLVED_THREADS: $TOTAL_UNRESOLVED"
+         ```
+      3. Trigger Greptile re-review (skip if already triggered since last commit):
+         ```bash
+         LAST_COMMIT_DATE=$(cd {{repo_path}} && git log -1 --format=%cI)
+         ALREADY_TRIGGERED=$(gh api repos/{{owner}}/{{repo_name}}/issues/{{pr_number}}/comments --jq '[.[] | select(.body == "@greptileai review" and .created_at > "'"$LAST_COMMIT_DATE"'")] | length')
+         if [ "$ALREADY_TRIGGERED" = "0" ]; then
+           gh pr comment {{pr_number}} --repo {{owner}}/{{repo_name}} --body "@greptileai review"
+         fi
+         ```
+      4. Build a summary including:
+         - Latest commit hash and message
+         - `UNRESOLVED_THREADS` count (from step 2)
+         - Whether re-review was triggered or skipped
+         - Branch name
+
+      Reply with:
+      STATUS: done
+      SUMMARY: a clean multi-line summary including commit, unresolved thread count, and re-review status — suitable for Slack
+    expects: "STATUS: done"
+    on_fail:
+      escalate_to: human
