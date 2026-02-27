@@ -89,7 +89,7 @@ The workflow cannot advance until you report. Your session ending without report
 }
 
 const DEFAULT_POLLING_TIMEOUT_SECONDS = 120;
-const DEFAULT_POLLING_MODEL = "default";
+const DEFAULT_POLLING_MODEL = "openai-codex/gpt-5.3-codex-spark";
 
 function extractModel(value: unknown): string | undefined {
   if (!value) return undefined;
