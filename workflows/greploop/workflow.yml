@@ -280,7 +280,7 @@ steps:
       3. Trigger Greptile re-review (skip if already triggered since last commit):
          ```bash
          LAST_COMMIT_DATE=$(cd {{repo_path}} && git log -1 --format=%cI)
-         ALREADY_TRIGGERED=$(gh api repos/{{owner}}/{{repo_name}}/issues/{{pr_number}}/comments --jq '[.[] | select(.body == "@greptileai review" and .created_at > "'$LAST_COMMIT_DATE'")] | length')
+         ALREADY_TRIGGERED=$(gh api repos/{{owner}}/{{repo_name}}/issues/{{pr_number}}/comments --jq '[.[] | select(.body == "@greptileai review" and .created_at > "'"$LAST_COMMIT_DATE"'")] | length')
          if [ "$ALREADY_TRIGGERED" = "0" ]; then
            gh pr comment {{pr_number}} --repo {{owner}}/{{repo_name}} --body "@greptileai review"
          fi
