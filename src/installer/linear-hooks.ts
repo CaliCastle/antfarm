@@ -155,6 +155,25 @@ export function exportIssueStory(issueId: string): LinearStory[] {
 }
 
 /**
+ * Export multiple Linear issues as ordered stories.
+ * Each issue identifier is fetched individually and returned in the provided order.
+ */
+export function exportIssueStories(issueIds: string[]): LinearStory[] {
+  return issueIds.map((issueId, i) => {
+    const issue = linearJson<LinearIssue>(["issue", "get", issueId]);
+    return {
+      id: `S${String(i + 1).padStart(2, "0")}`,
+      title: `[${issue.identifier}] ${issue.title}`,
+      description: issue.description || issue.title,
+      acceptanceCriteria: parseAcceptanceCriteria(issue.description || issue.title),
+      linearIssueId: issue.id,
+      linearIdentifier: issue.identifier,
+      teamId: issue.team.id,
+    };
+  });
+}
+
+/**
  * Parse acceptance criteria from issue description.
  * Looks for checkbox items (- [ ] ...) or numbered lists, falling back to generic criteria.
  */

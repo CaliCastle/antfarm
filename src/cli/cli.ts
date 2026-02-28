@@ -96,6 +96,7 @@ function printUsage() {
       "antfarm workflow run <name> <task>   Start a workflow run",
       "  --stories-from linear:<project-id>   Import stories from Linear (skip planner)",
       "  --stories-from linear-issue:<id>     Import a single Linear issue as a story",
+      "  --stories-from linear-issues:<id1>,<id2>,...  Import multiple Linear issues as ordered stories",
       "  --repo <path>                        Explicit repo path",
       "  --approve                            Pause after import for human approval",
       "  --linear-team <id>                   Team ID for blank-slate Linear integration",

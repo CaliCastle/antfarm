@@ -8,6 +8,7 @@ import { emitEvent } from "./events.js";
 import {
   exportProjectStories,
   exportIssueStory,
+  exportIssueStories,
   ensureLabel,
   applyLabel,
   type LinearStory,
@@ -18,7 +19,7 @@ export interface RunWorkflowParams {
   workflowId: string;
   taskTitle: string;
   notifyUrl?: string;
-  storiesFrom?: string;   // "linear:<project-id>" or "linear-issue:<issue-id>"
+  storiesFrom?: string;   // "linear:<project-id>", "linear-issue:<issue-id>", or "linear-issues:<id1>,<id2>,..."
   repo?: string;           // explicit --repo flag
   approve?: boolean;       // pause after export for human approval
   linearTeam?: string;     // team ID for blank-slate mode
@@ -60,8 +61,15 @@ export async function runWorkflow(params: RunWorkflowParams): Promise<{ id: stri
     } else if (source === "linear-issue") {
       linearStories = exportIssueStory(sourceId);
       skipPlanStep = true;
+    } else if (source === "linear-issues") {
+      const issueIds = sourceId.split(",").map(id => id.trim()).filter(Boolean);
+      if (issueIds.length === 0) {
+        throw new Error(`No issue IDs provided in --stories-from "linear-issues:...".`);
+      }
+      linearStories = exportIssueStories(issueIds);
+      skipPlanStep = true;
     } else {
-      throw new Error(`Unknown stories source: "${source}". Supported: "linear", "linear-issue".`);
+      throw new Error(`Unknown stories source: "${source}". Supported: "linear", "linear-issue", "linear-issues".`);
     }
 
     // Ensure wbs/nick label and apply to imported issues
