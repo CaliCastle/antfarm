@@ -172,7 +172,9 @@ antfarm dashboard status       # Check status
 |---------|-------------|
 | `antfarm workflow run <id> <task>` | Start a run |
 | `antfarm workflow run <id> <task> --repo <path>` | Start a run with explicit repo |
-| `antfarm workflow run <id> <task> --stories-from linear:<project-id>` | Import stories from Linear |
+| `antfarm workflow run <id> <task> --stories-from linear:<project-id>` | Import stories from Linear project |
+| `antfarm workflow run <id> <task> --stories-from linear-issue:<id>` | Import a single Linear issue as a story |
+| `antfarm workflow run <id> <task> --stories-from linear-issues:<id1>,<id2>,...` | Import multiple Linear issues as ordered stories |
 | `antfarm workflow run <id> <task> --approve` | Pause after import for approval |
 | `antfarm workflow status <query>` | Check run status |
 | `antfarm workflow runs` | List all runs |
